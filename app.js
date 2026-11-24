@@ -15,12 +15,18 @@ const minuscula = (t) => t.charAt(0).toLowerCase() + t.slice(1);
 
 /* ---------- Estado ---------- */
 function estadoInicial() {
-  return { v: 1, plano: clone(PLANO), proximo: 0, sessoes: [], atual: null, notas: {}, timer: null };
+  return { v: 1, plano: clone(PLANO), planoVersao: PLANO.versao, planoInicio: null, proximo: 0, sessoes: [], atual: null, notas: {}, timer: null };
 }
+let planoAtualizado = false;
 function carregar() {
   try {
     const s = JSON.parse(localStorage.getItem(CHAVE));
-    if (s && s.plano && Array.isArray(s.sessoes)) return { ...estadoInicial(), ...s };
+    if (s && s.plano && Array.isArray(s.sessoes)) {
+      const e = { ...estadoInicial(), ...s, planoVersao: s.planoVersao };
+      // o plano mudou desde a última vez: troca pelo novo e mantém histórico, anotações e cargas
+      if (e.planoVersao !== PLANO.versao) { e.plano = clone(PLANO); e.proximo = 0; e.planoVersao = PLANO.versao; planoAtualizado = true; }
+      return e;
+    }
   } catch (e) { /* começa do zero */ }
   return estadoInicial();
 }
@@ -50,20 +56,37 @@ function resumoSets(sets, un) {
 }
 function deveSubir(e) {
   const u = ultima(e.ex);
-  if (!u || e.un === 's' || u.sets.length < e.series) return false;
+  if (!u || e.un === 's' || u.sets.length < (u.series || e.series)) return false;
   return u.sets.every((s) => num(s.reps) >= e.repMax);
 }
 const alvo = (e) => `${e.series} × ${e.repMin}–${e.repMax}${e.un === 's' ? ' s' : ''}`;
 function estimativa(t, curto) {
   const lista = curto ? t.exercicios.slice(0, 4) : t.exercicios;
-  const forca = lista.reduce((a, e) => a + e.series * (e.descanso + 45), 0) / 60;
-  return Math.round((forca + cardioMin(t.cardio)) / 5) * 5;
+  const tipo = fasePlano().tipo;
+  const forca = lista.reduce((a, e) => a + seriesDaFase(e.series, tipo) * (e.descanso + 45), 0) / 60;
+  // + 5 min de aquecimento e ~1,5 min de troca de aparelho por exercício
+  return Math.round((forca + 5 + lista.length * 1.5 + cardioMin(t.cardio)) / 5) * 5;
 }
-const cardioMin = (c) => (c.tipo === 'intervalado' ? (c.voltas * (c.forte + c.leve)) / 60 : c.min);
+const cardioMin = (c) => (c.tipo === 'intervalado' ? Math.round(((c.aquec || 0) + c.voltas * (c.forte + c.leve)) / 60) : c.min);
 const cardioTexto = (c) => (c.tipo === 'intervalado'
-  ? `Intervalado: ${c.forte / 60} min forte, ${c.leve / 60} min leve, ${c.voltas} vezes (${cardioMin(c)} min)`
+  ? `Intervalado: ${c.aquec ? `${c.aquec / 60} min de aquecimento, depois ` : ''}${c.forte / 60} min forte e ${c.leve / 60} min leve, ${c.voltas} vezes (${cardioMin(c)} min)`
   : `${c.min} min em ritmo constante`);
 function inicioSemana(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }
+// Fases do plano, contadas em semanas (segunda a domingo) desde o primeiro treino:
+// semanas 1 e 2 = adaptação (uma série a menos); semana 6 = alívio (metade das séries); o resto = normal
+function fasePlano() {
+  if (!S.planoInicio) return { sem: 1, tipo: 'adaptacao' };
+  const sem = Math.round((inicioSemana(Date.now()) - inicioSemana(S.planoInicio)) / (7 * 864e5)) + 1;
+  return { sem, tipo: sem <= 2 ? 'adaptacao' : sem === 6 ? 'alivio' : 'normal' };
+}
+const seriesDaFase = (n, tipo) => (tipo === 'adaptacao' ? Math.max(2, n - 1) : tipo === 'alivio' ? Math.max(1, Math.ceil(n / 2)) : n);
+function avisoFase() {
+  const f = fasePlano();
+  if (f.tipo === 'adaptacao') return `<b>Semana ${f.sem} de 2 de adaptação.</b> Uma série a menos em cada exercício. Nas máquinas, leve a última série até perto do limite para achar a carga certa. No stiff, na elevação pélvica e nos halteres, deixe sobrar 3 repetições.`;
+  if (f.tipo === 'alivio') return '<b>Semana de alívio.</b> Metade das séries, com a mesma carga de sempre. Não tente bater recordes: é para o corpo recuperar.';
+  if (f.sem > 12) return `<b>Semana ${f.sem} do plano.</b> Ele foi feito para 8 a 12 semanas: está na hora de revisar o treino.`;
+  return '';
+}
 
 /* ---------- Som, vibração e tela acesa ---------- */
 let actx = null;
@@ -135,9 +158,11 @@ function montarItem(e) {
 function comecar(idx, curto) {
   const t = treinos()[idx];
   const lista = curto ? t.exercicios.slice(0, 4) : t.exercicios;
+  if (!S.planoInicio) S.planoInicio = Date.now();
+  const fase = fasePlano().tipo;
   S.atual = {
     id: Date.now(), idx, treino: t.id, nome: t.nome, foco: t.foco, inicio: Date.now(), curto: !!curto,
-    itens: lista.map(montarItem),
+    itens: lista.map((e) => montarItem({ ...e, series: seriesDaFase(e.series, fase) })), fase,
     cardio: { ...clone(t.cardio), aparelho: t.cardio.aparelho || 'esteira', ok: false },
   };
   ui.escolha = null; salvar(); telaAcesa(); desenhar(); window.scrollTo(0, 0);
@@ -197,6 +222,7 @@ function telaHoje() {
   const naSemana = S.sessoes.filter((s) => s.fim >= ini).length;
   const ult = S.sessoes[S.sessoes.length - 1];
   const dias = ult ? Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(ult.fim).setHours(0, 0, 0, 0)) / 864e5) : null;
+  const fase = fasePlano(), nota = avisoFase();
   return `<div class="abas">${treinos().map((x, i) => `<button class="${i === idx ? 'on' : ''}" data-a="escolher" data-i="${i}" aria-label="Treino ${esc(x.id)}">${esc(x.id)}</button>`).join('')}<button class="mais" data-a="personalizado" aria-label="Treino personalizado">+</button></div>
   <header class="ficha">
     <div class="kick mono">Sansão · ficha nº ${S.sessoes.length + 1} · ${esc(fmtData(Date.now()))}</div>
@@ -204,7 +230,8 @@ function telaHoje() {
     <div class="st">${esc(t.nome)}, <mark>${esc(minuscula(t.foco))}</mark></div>
     <div class="carimbo mono"><span><b>${estimativa(t)}</b>min<br>${t.exercicios.length} exerc.</span></div>
   </header>
-  <ol class="lista">${t.exercicios.map((e, i) => `<li><span class="i mono">${i + 1}</span><span class="n">${esc(e.nome)}</span><span class="dots"></span><span class="q mono">${e.series}×${e.repMin}–${e.repMax}${e.un === 's' ? 's' : ''}</span></li>`).join('')}
+  ${nota ? `<p class="fase">${nota}</p>` : ''}
+  <ol class="lista">${t.exercicios.map((e, i) => `<li><span class="i mono">${i + 1}</span><span class="n">${esc(e.nome)}</span><span class="dots"></span><span class="q mono">${seriesDaFase(e.series, fase.tipo)}×${e.repMin}–${e.repMax}${e.un === 's' ? 's' : ''}</span></li>`).join('')}
     <li><span class="i mono">+</span><span class="n">Cardio${t.cardio.tipo === 'intervalado' ? ' intervalado' : ''}</span><span class="dots"></span><span class="q mono">${cardioMin(t.cardio)} min</span></li></ol>
   <button class="btn pri" data-a="comecar" data-i="${idx}">Começar treino →</button>
   <button class="lnk centro" data-a="comecar" data-i="${idx}" data-curto="1">ou treino curto: 4 exercícios, ~${estimativa(t, true)} min</button>
@@ -217,7 +244,7 @@ function cartaoExercicio(it, i) {
   const dica = deveSubir(it)
     ? `<div class="ult sobe"><mark>Bateu ${it.repMax} repetições em todas as séries da última vez: suba a carga hoje.</mark></div>`
     : u ? `<div class="ult">última vez (${esc(fmtData(u.quando))}): ${esc(resumoSets(u.sets, it.un))}</div>`
-      : '<div class="ult cinza">primeira vez: escolha uma carga em que as 2 últimas repetições saiam difíceis</div>';
+      : '<div class="ult cinza">primeira vez: comece leve e ache a carga em que as 2 últimas repetições saiam difíceis</div>';
   return `<div class="card ex ${feito ? 'feito' : ''}" id="it-${i}">
     <button class="exhead" data-a="detalhe" data-i="${i}"><span class="pola">${anim(it.img)}</span>
       <span class="nm">${esc(it.nome)}</span><span class="mt mono">${alvo(it)} · descanso ${fmtTempo(it.descanso)}</span></button>
@@ -239,7 +266,7 @@ function cartaoCardio() {
   return `<div class="card ex ${c.ok ? 'feito' : ''}" id="cardio">
     <div class="exhead"><span class="pola">${anim(c.aparelho)}</span><span class="nm">Cardio</span><span class="mt mono">${esc(cardioTexto(c))}${c.opcional ? ' · opcional' : ''}</span></div>
     <div class="seg">${Object.entries(APARELHOS).map(([k, v]) => `<button class="${c.aparelho === k ? 'on' : ''}" data-a="aparelho" data-k="${k}">${v}</button>`).join('')}</div>
-    <div class="ult cinza">${c.tipo === 'intervalado' ? 'no trecho forte não deve dar para conversar; no leve, recupere o fôlego' : 'respiração acelerada, mas ainda dá para falar frases curtas'}</div>
+    <div class="ult cinza">${c.tipo === 'intervalado' ? 'no trecho forte não deve dar para conversar; no leve, recupere o fôlego' : 'respiração acelerada, mas ainda dá para falar frases curtas; a cada 2 semanas, suba um pouco a inclinação ou o ritmo'}</div>
     <div class="row" style="margin-top:12px"><button class="btn ${c.ok ? '' : 'pri'} grow" data-a="cardio-iniciar">${rodando ? 'Reiniciar cronômetro' : 'Iniciar cronômetro'}</button>
       <button class="btn estreito" style="min-height:60px" data-a="cardio-ok">${c.ok ? 'desmarcar' : 'já fiz ✓'}</button></div>
   </div>`;
@@ -258,6 +285,10 @@ function telaTreino() {
       <div class="st small">${a.pers ? 'treino personalizado' : `${esc(a.nome)}, ${esc(minuscula(a.foco))}`}${a.curto ? ' (curto)' : ''}</div></div>
     <button class="lnk verm" style="padding-top:4px" data-a="finalizar">finalizar</button></div>
   ${progHTML()}
+  ${!a.pers && avisoFase() ? `<p class="fase">${avisoFase()}</p>` : ''}
+  ${a.itens.length ? `<div class="card aquec ${a.aquecOk ? 'feito' : ''}" id="aquec"><div class="row"><div class="grow"><span class="nm">Aquecimento</span><span class="mt mono">3 a 5 min de cardio leve</span></div>
+      <button class="check" data-a="aquec-ok" aria-label="Marcar aquecimento">${a.aquecOk ? 'feito ✓' : '✓'}</button></div>
+    <div class="ult cinza">depois, antes do primeiro exercício: 1 série com metade da carga × 10 e 1 série com três quartos da carga × 5</div></div>` : ''}
   ${a.itens.length ? '' : '<p class="rodape">Este treino está vazio. Adicione os exercícios conforme for fazendo.</p>'}
   ${a.itens.map(cartaoExercicio).join('')}
   <button class="btn" style="width:calc(100% - 4px)" data-a="adicionar-ex">+ adicionar exercício</button>
@@ -316,6 +347,8 @@ function telaTreinos() {
     <div style="margin-top:8px">${t.exercicios.map((e, i) => `<div class="item"><button class="grow" style="text-align:left" data-a="editar" data-w="${w}" data-i="${i}"><b>${esc(e.nome)}</b><br><span class="mut small">${alvo(e)} · descanso ${fmtTempo(e.descanso)}</span></button><span class="mut">✎</span></div>`).join('')}
       <div class="item"><button class="grow" style="text-align:left" data-a="editar-cardio" data-w="${w}"><b>Cardio</b><br><span class="mut small">${esc(cardioTexto(t.cardio))}</span></button><span class="mut">✎</span></div></div>
     <button class="link" data-a="novo-ex" data-w="${w}">+ adicionar exercício</button></div>`).join('')}
+  <div class="card"><h2>Fase do plano</h2><div class="mut small">${S.planoInicio ? `Começou em ${esc(fmtData(S.planoInicio))}. Você está na semana ${fasePlano().sem}.` : 'A contagem começa no primeiro treino.'} Semanas 1 e 2: adaptação, com uma série a menos. Semana 6: alívio, com metade das séries. O plano vale por 8 a 12 semanas.</div>
+    ${S.planoInicio ? '<button class="link" data-a="reiniciar-fase">recomeçar a contagem das semanas</button>' : ''}</div>
   <div class="card"><h2>Backup</h2><div class="mut small">Os dados ficam só neste celular. Salve um arquivo de backup de vez em quando.</div>
     <div class="stack" style="margin-top:10px"><button class="btn" data-a="exportar">Salvar backup</button>
       <label class="btn ghost">Restaurar backup<input type="file" accept="application/json,.json" data-c="importar" hidden></label>
@@ -449,11 +482,13 @@ const acoes = {
   'pers-comecar': () => comecarPersonalizado($('#tp-nome').value.trim()),
   'pers-repetir': (d) => { const s = S.sessoes.find((x) => x.id === +d.id); if (s) comecarPersonalizado(s.nome, s); },
   aparelho: (d) => { S.atual.cardio.aparelho = d.k; salvar(); redesenharCardio(); },
+  'aquec-ok': () => { S.atual.aquecOk = !S.atual.aquecOk; salvar(); desenhar(); },
+  'reiniciar-fase': () => { if (confirm('Recomeçar a contagem das semanas? O próximo treino volta a ser a semana 1 (adaptação).')) { S.planoInicio = null; salvar(); desenhar(); } },
   'cardio-ok': () => { const c = S.atual.cardio; c.ok = !c.ok; if (S.timer && S.timer.cardio) pararTimer(); salvar(); redesenharCardio(); },
   'cardio-iniciar': () => {
     const c = S.atual.cardio, ap = APARELHOS[c.aparelho];
     if (c.tipo === 'intervalado') {
-      const f = []; for (let v = 1; v <= c.voltas; v++) { f.push({ rot: `Forte · ${ap}`, dur: c.forte, forte: true, volta: `${v}/${c.voltas}` }, { rot: `Leve · ${ap}`, dur: c.leve, volta: `${v}/${c.voltas}` }); }
+      const f = c.aquec ? [{ rot: `Aquecimento · ${ap}`, dur: c.aquec }] : []; for (let v = 1; v <= c.voltas; v++) { f.push({ rot: `Forte · ${ap}`, dur: c.forte, forte: true, volta: `${v}/${c.voltas}` }, { rot: `Leve · ${ap}`, dur: c.leve, volta: `${v}/${c.voltas}` }); }
       iniciarTimer(f, { cardio: true });
     } else iniciarTimer([{ rot: `Cardio · ${ap}`, dur: c.min * 60 }], { cardio: true });
     som(1, 880); redesenharCardio();
@@ -481,7 +516,7 @@ const acoes = {
   'salvar-cardio': (d) => {
     const c = treinos()[+d.w].cardio, tipo = $('#c-tipo').value;
     c.tipo = tipo; c.min = Math.min(120, Math.max(1, Math.round(num($('#c-min').value) || 20)));
-    if (tipo === 'intervalado') { c.voltas = Math.min(30, Math.max(1, Math.round(num($('#c-voltas').value) || 8))); c.forte = c.forte || 60; c.leve = c.leve || 60; c.aparelho = c.aparelho || 'eliptico'; }
+    if (tipo === 'intervalado') { c.voltas = Math.min(30, Math.max(1, Math.round(num($('#c-voltas').value) || 8))); c.forte = c.forte || 60; c.leve = c.leve || 60; c.aparelho = c.aparelho || 'eliptico'; if (c.aquec == null) c.aquec = 180; }
     salvar(); fecharFolha(); desenhar();
   },
   exportar: () => {
@@ -521,7 +556,7 @@ document.addEventListener('change', (ev) => {
       try {
         const n = JSON.parse(r.result);
         if (!n || !n.plano || !Array.isArray(n.plano.treinos) || !Array.isArray(n.sessoes)) throw new Error('formato');
-        if (confirm(`Restaurar este backup (${n.sessoes.length} treinos)? Os dados atuais deste celular serão substituídos.`)) { S = { ...estadoInicial(), ...n, atual: null, timer: null }; salvar(); desenhar(); aviso('Backup restaurado.'); }
+        if (confirm(`Restaurar este backup (${n.sessoes.length} treinos)? Os dados atuais deste celular serão substituídos.`)) { S = { ...estadoInicial(), ...n, planoVersao: n.planoVersao, atual: null, timer: null }; if (S.planoVersao !== PLANO.versao) { S.plano = clone(PLANO); S.planoVersao = PLANO.versao; S.proximo = 0; } salvar(); desenhar(); aviso('Backup restaurado.'); }
       } catch (e) { aviso('Este arquivo não é um backup válido do Sansão.'); }
     };
     r.readAsText(ev.target.files[0]); ev.target.value = '';
@@ -533,3 +568,4 @@ document.addEventListener('focusin', (ev) => { if (ev.target.matches('.set input
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 telaAcesa();
 desenhar();
+if (planoAtualizado) { salvar(); aviso('Treino atualizado: nova ordem de A a E.'); }

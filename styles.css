@@ -70,6 +70,13 @@ mark { background: linear-gradient(transparent 55%, var(--mark) 55%); color: inh
 .semana i { width: 27px; height: 27px; border: 2px solid var(--ink); display: grid; place-items: center; font-style: normal; color: var(--red); font-weight: 600; font-size: 19px; line-height: 1; }
 .rodape { font-style: italic; color: var(--mut); font-size: 15px; margin: 12px 0 0; }
 
+.fase { background: var(--mark); border: 2px solid var(--ink); padding: 10px 12px; font-size: 14.5px; line-height: 1.35; margin: 14px 4px 0 0; transform: rotate(-.4deg); }
+.aquec { margin-top: 16px; }
+.aquec .nm { font-size: 20px; }
+.aquec .check { width: 72px; flex: none; }
+.aquec.feito .check { border-color: transparent; color: var(--red); font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 17px; transform: rotate(-6deg); }
+.aquec.feito .nm::after { content: ""; }
+
 /* Cartões */
 .card { background: var(--card); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); padding: 14px; margin: 0 4px 18px 0; }
 .card.feito { box-shadow: none; border-style: dashed; }

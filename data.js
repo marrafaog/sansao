@@ -1,4 +1,4 @@
-// Catálogo de exercícios e plano de treino do Gabriel (aprovado em 23/11/2026).
+// Catálogo de exercícios e plano de treino do Gabriel (aprovado em 23/11/2026; revisado no mesmo dia após a revisão em pares).
 // grupo = exercícios do mesmo grupo são substitutos diretos (mesmo movimento e mesmo músculo)
 // area  = músculo, usado para listar "mesmo músculo, outro movimento"
 // As fotos ficam em img/<id>-0.jpg e img/<id>-1.jpg (ou no campo img, quando reaproveita outra foto).
@@ -48,7 +48,7 @@ c('desenvolvimento-maquina', 'Desenvolvimento máquina', 'ombro-desenvolvimento'
 c('desenvolvimento-halteres', 'Desenvolvimento com halteres', 'ombro-desenvolvimento', 'Sentado, costas apoiadas. Suba os halteres acima da cabeça e desça até a altura das orelhas.');
 c('desenvolvimento-arnold', 'Desenvolvimento Arnold', 'ombro-desenvolvimento', 'Comece com as palmas viradas para você e gire os punhos enquanto sobe os halteres.');
 c('desenvolvimento-smith', 'Desenvolvimento no Smith', 'ombro-desenvolvimento', 'Sentado sob a barra guiada. Desça até a altura do queixo e empurre para cima.');
-c('elevacao-lateral', 'Elevação lateral com halter', 'ombro-lateral', 'Suba os braços até a altura dos ombros, cotovelos levemente dobrados, sem balançar o corpo.');
+c('elevacao-lateral', 'Elevação lateral com halter', 'ombro-lateral', 'Braços um pouco à frente do corpo, cotovelos levemente dobrados. Suba até a altura dos ombros, sem balançar o corpo.');
 c('elevacao-lateral-sentado', 'Elevação lateral sentado', 'ombro-lateral', 'Sentado, para não roubar com o corpo. Suba os braços até a altura dos ombros.');
 c('elevacao-lateral-polia', 'Elevação lateral na polia', 'ombro-lateral', 'Polia baixa, um braço por vez. Suba até a altura do ombro e desça devagar. Séries por lado.');
 c('crucifixo-inverso', 'Crucifixo inverso máquina', 'ombro-posterior', 'Abra os braços para trás até a linha dos ombros, sem tirar o peito do apoio.');
@@ -77,8 +77,8 @@ c('triceps-testa', 'Tríceps testa com barra W', 'triceps', 'Deitado, desça a b
 c('triceps-banco', 'Tríceps no banco', 'triceps', 'Mãos no banco atrás de você. Desça o corpo dobrando os cotovelos e empurre para subir.', { semCarga: true });
 
 // Pernas: frente da coxa (sem agachamento)
-c('leg-press', 'Leg press', 'perna-empurrar', 'Pés na largura dos ombros. Desça até os joelhos formarem 90° e suba sem travar os joelhos.');
-c('leg-press-alto', 'Leg press com os pés altos', 'perna-empurrar', 'Pés na parte de cima da plataforma, para trabalhar mais glúteo e posterior. Não trave os joelhos.', { img: 'leg-press' });
+c('leg-press', 'Leg press', 'perna-empurrar', 'Pés na largura dos ombros. Desça só até antes de o quadril descolar do banco e suba sem travar os joelhos.');
+c('leg-press-alto', 'Leg press com os pés altos', 'perna-empurrar', 'Pés na parte de cima da plataforma, para trabalhar mais glúteo e posterior. Desça só até antes de o quadril descolar do banco e não trave os joelhos.', { img: 'leg-press' });
 c('leg-press-unilateral', 'Leg press unilateral', 'perna-empurrar', 'Uma perna por vez, com menos carga. Desça controlando e não trave o joelho. Séries por lado.', { img: 'leg-press' });
 c('afundo-halteres', 'Afundo com halteres', 'perna-empurrar', 'Passo à frente, desça até o joelho de trás quase tocar o chão e volte. Séries por lado.');
 c('step-up', 'Subida no banco com halteres', 'perna-empurrar', 'Suba no banco empurrando com a perna da frente e desça devagar. Séries por lado.');
@@ -89,13 +89,13 @@ c('extensora-unilateral', 'Cadeira extensora unilateral', 'perna-extensao', 'Uma
 c('flexora', 'Cadeira flexora', 'posterior-flexao', 'Puxe os calcanhares para baixo do banco e volte devagar, sem soltar o peso.');
 c('mesa-flexora', 'Mesa flexora', 'posterior-flexao', 'Deitado de bruços. Traga os calcanhares em direção ao glúteo, sem tirar o quadril do banco.');
 c('flexora-em-pe', 'Flexora em pé', 'posterior-flexao', 'Uma perna por vez. Traga o calcanhar em direção ao glúteo e desça devagar. Séries por lado.');
-c('stiff', 'Stiff com halteres', 'posterior-quadril', 'Joelhos quase esticados, costas retas. Leve o quadril para trás e desça os halteres rente às pernas. Comece leve.');
+c('stiff', 'Stiff com halteres', 'posterior-quadril', 'Costas retas, joelhos levemente dobrados. Leve o quadril para trás e desça os halteres rente às pernas, só até abaixo dos joelhos. No primeiro mês use carga leve, sobrando 3 a 4 repetições, e peça para um professor olhar.');
 c('stiff-barra', 'Stiff com barra', 'posterior-quadril', 'Joelhos quase esticados, costas retas. Leve o quadril para trás e desça a barra rente às pernas.');
 c('terra-romeno', 'Levantamento terra romeno', 'posterior-quadril', 'Joelhos levemente dobrados, costas retas. Desça a barra até abaixo dos joelhos e suba contraindo o glúteo.');
 c('pull-through', 'Pull through na polia', 'posterior-quadril', 'De costas para a polia baixa, corda entre as pernas. Leve o quadril para trás e depois para a frente.');
 
 // Glúteo
-c('elevacao-pelvica', 'Elevação pélvica', 'gluteo', 'Costas apoiadas no banco. Suba o quadril até alinhar com os joelhos e aperte o glúteo em cima.');
+c('elevacao-pelvica', 'Elevação pélvica', 'gluteo', 'Costas apoiadas no banco, queixo recolhido. Suba o quadril até alinhar com os joelhos, sem arquear a lombar. No primeiro mês faça na máquina ou com um halter no quadril; barra só depois.');
 c('ponte-gluteo', 'Ponte de glúteo com barra', 'gluteo', 'Deitado no chão, barra sobre o quadril. Suba o quadril e aperte o glúteo em cima.');
 c('ponte-unilateral', 'Ponte de glúteo unilateral', 'gluteo', 'Deitado, uma perna no ar. Suba o quadril com a outra perna. Séries por lado.', { semCarga: true });
 c('gluteo-polia', 'Glúteo na polia (coice)', 'gluteo', 'Tornozeleira na polia baixa. Leve a perna para trás sem arquear a lombar. Séries por lado.');
@@ -122,47 +122,49 @@ c('superman', 'Superman no chão', 'lombar', 'De bruços, tire braços e pernas 
 // Monta um exercício do plano a partir do catálogo
 const ex = (id, series, repMin, repMax, descanso) => ({ ex: id, ...CAT[id], series, repMin, repMax, descanso });
 
+// versao: ao mudar o plano, aumente este número para os celulares receberem o plano novo
 const PLANO = {
+  versao: 2,
   treinos: [
     {
-      id: 'A', nome: 'Superiores', foco: 'Peito e costas',
+      id: 'A', nome: 'Pernas', foco: 'Frente da coxa e abdômen',
       exercicios: [
-        ex('supino-reto-halteres', 4, 8, 10, 120), ex('puxada-frente', 4, 8, 12, 90), ex('supino-inclinado-articulado', 3, 8, 12, 90),
-        ex('remada-maquina', 4, 8, 12, 90), ex('elevacao-lateral', 3, 12, 15, 60), ex('rosca-w', 3, 10, 12, 60), ex('triceps-corda', 3, 10, 12, 60),
-      ],
-      cardio: { tipo: 'continuo', min: 20 },
-    },
-    {
-      id: 'B', nome: 'Pernas', foco: 'Frente da coxa e abdômen',
-      exercicios: [
-        ex('leg-press', 4, 8, 12, 120), ex('extensora', 4, 10, 15, 60), ex('flexora', 3, 10, 12, 60),
-        ex('gemeos-pe', 4, 10, 15, 60), ex('abdominal-infra', 3, 10, 15, 45), ex('prancha', 3, 30, 45, 45),
+        ex('leg-press', 4, 8, 12, 120), ex('extensora', 4, 10, 15, 60), ex('flexora', 3, 10, 12, 60), ex('gemeos-pe', 4, 10, 15, 60),
+        ex('abdominal-infra', 3, 10, 15, 45), ex('prancha', 3, 30, 45, 45), ex('hiperextensao', 3, 10, 12, 60),
       ],
       cardio: { tipo: 'continuo', min: 25 },
     },
     {
-      id: 'C', nome: 'Empurrar', foco: 'Peito, ombro e tríceps',
+      id: 'B', nome: 'Superiores', foco: 'Peito e costas',
       exercicios: [
-        ex('supino-inclinado-halteres', 4, 8, 10, 120), ex('desenvolvimento-maquina', 4, 8, 12, 90), ex('crucifixo-maquina', 3, 10, 15, 60),
-        ex('elevacao-lateral', 4, 12, 15, 60), ex('triceps-frances', 3, 10, 12, 60), ex('triceps-maquina', 3, 10, 12, 60),
+        ex('supino-reto-halteres', 4, 8, 12, 120), ex('puxada-frente', 3, 8, 12, 90), ex('supino-inclinado-articulado', 3, 8, 12, 90),
+        ex('remada-maquina', 3, 8, 12, 90), ex('elevacao-lateral', 3, 12, 20, 60), ex('rosca-w', 3, 10, 15, 60), ex('triceps-corda', 3, 10, 12, 60),
       ],
       cardio: { tipo: 'continuo', min: 20 },
     },
     {
-      id: 'D', nome: 'Puxar', foco: 'Costas, bíceps e ombro de trás',
-      exercicios: [
-        ex('puxada-neutra', 4, 8, 12, 90), ex('remada-baixa', 4, 8, 12, 90), ex('serrote', 3, 10, 12, 60), ex('crucifixo-inverso', 3, 12, 15, 60),
-        ex('rosca-45', 3, 10, 12, 60), ex('rosca-martelo', 3, 10, 12, 60), ex('hiperextensao', 3, 10, 12, 60),
-      ],
-      cardio: { tipo: 'continuo', min: 20 },
-    },
-    {
-      id: 'E', nome: 'Pernas', foco: 'Posterior, glúteo e condicionamento',
+      id: 'C', nome: 'Pernas', foco: 'Posterior e glúteo',
       exercicios: [
         ex('stiff', 3, 10, 12, 90), ex('leg-press-alto', 3, 10, 12, 120), ex('flexora', 4, 10, 12, 60),
         ex('elevacao-pelvica', 3, 10, 12, 90), ex('gemeos-sentado', 3, 12, 15, 60), ex('abdominal-supra', 3, 12, 15, 45),
       ],
-      cardio: { tipo: 'intervalado', forte: 60, leve: 60, voltas: 8, aparelho: 'eliptico' },
+      cardio: { tipo: 'continuo', min: 20 },
+    },
+    {
+      id: 'D', nome: 'Empurrar', foco: 'Peito, ombro e tríceps',
+      exercicios: [
+        ex('supino-inclinado-halteres', 4, 8, 12, 120), ex('desenvolvimento-maquina', 4, 8, 12, 90), ex('crucifixo-maquina', 3, 10, 15, 60),
+        ex('elevacao-lateral', 3, 12, 20, 60), ex('triceps-frances', 3, 10, 12, 60), ex('triceps-maquina', 3, 10, 12, 60),
+      ],
+      cardio: { tipo: 'continuo', min: 20 },
+    },
+    {
+      id: 'E', nome: 'Puxar', foco: 'Costas, bíceps e condicionamento',
+      exercicios: [
+        ex('puxada-neutra', 4, 8, 12, 90), ex('remada-baixa', 3, 8, 12, 90), ex('serrote', 3, 10, 12, 60), ex('crucifixo-inverso', 3, 12, 15, 60),
+        ex('rosca-45', 3, 10, 15, 60), ex('rosca-martelo', 3, 10, 15, 60), ex('face-pull', 3, 12, 15, 60),
+      ],
+      cardio: { tipo: 'intervalado', aquec: 180, forte: 60, leve: 60, voltas: 8, aparelho: 'eliptico' },
     },
   ],
 };
