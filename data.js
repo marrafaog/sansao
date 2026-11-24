@@ -120,16 +120,18 @@ c('hiperextensao', 'Hiperextensão lombar', 'lombar', 'Desça com as costas reta
 c('superman', 'Superman no chão', 'lombar', 'De bruços, tire braços e pernas do chão ao mesmo tempo, segure um instante e desça.', { semCarga: true });
 
 // Monta um exercício do plano a partir do catálogo
-const ex = (id, series, repMin, repMax, descanso) => ({ ex: id, ...CAT[id], series, repMin, repMax, descanso });
+// leves = séries leves de aquecimento antes dele: 2 no primeiro exercício do treino, 1 quando entra um músculo
+// ainda frio ou um movimento pesado/novo, 0 nos demais
+const ex = (id, series, repMin, repMax, descanso, leves = 0) => ({ ex: id, ...CAT[id], series, repMin, repMax, descanso, leves });
 
 // versao: ao mudar o plano, aumente este número para os celulares receberem o plano novo
 const PLANO = {
-  versao: 2,
+  versao: 3,
   treinos: [
     {
       id: 'A', nome: 'Pernas', foco: 'Frente da coxa e abdômen',
       exercicios: [
-        ex('leg-press', 4, 8, 12, 120), ex('extensora', 4, 10, 15, 60), ex('flexora', 3, 10, 12, 60), ex('gemeos-pe', 4, 10, 15, 60),
+        ex('leg-press', 4, 8, 12, 120, 2), ex('extensora', 4, 10, 15, 60), ex('flexora', 3, 10, 12, 60, 1), ex('gemeos-pe', 4, 10, 15, 60),
         ex('abdominal-infra', 3, 10, 15, 45), ex('prancha', 3, 30, 45, 45), ex('hiperextensao', 3, 10, 12, 60),
       ],
       cardio: { tipo: 'continuo', min: 25 },
@@ -137,7 +139,7 @@ const PLANO = {
     {
       id: 'B', nome: 'Superiores', foco: 'Peito e costas',
       exercicios: [
-        ex('supino-reto-halteres', 4, 8, 12, 120), ex('puxada-frente', 3, 8, 12, 90), ex('supino-inclinado-articulado', 3, 8, 12, 90),
+        ex('supino-reto-halteres', 4, 8, 12, 120, 2), ex('puxada-frente', 3, 8, 12, 90, 1), ex('supino-inclinado-articulado', 3, 8, 12, 90),
         ex('remada-maquina', 3, 8, 12, 90), ex('elevacao-lateral', 3, 12, 20, 60), ex('rosca-w', 3, 10, 15, 60), ex('triceps-corda', 3, 10, 12, 60),
       ],
       cardio: { tipo: 'continuo', min: 20 },
@@ -145,15 +147,15 @@ const PLANO = {
     {
       id: 'C', nome: 'Pernas', foco: 'Posterior e glúteo',
       exercicios: [
-        ex('stiff', 3, 10, 12, 90), ex('leg-press-alto', 3, 10, 12, 120), ex('flexora', 4, 10, 12, 60),
-        ex('elevacao-pelvica', 3, 10, 12, 90), ex('gemeos-sentado', 3, 12, 15, 60), ex('abdominal-supra', 3, 12, 15, 45),
+        ex('stiff', 3, 10, 12, 90, 2), ex('leg-press-alto', 3, 10, 12, 120, 1), ex('flexora', 4, 10, 12, 60),
+        ex('elevacao-pelvica', 3, 10, 12, 90, 1), ex('gemeos-sentado', 3, 12, 15, 60), ex('abdominal-supra', 3, 12, 15, 45),
       ],
       cardio: { tipo: 'continuo', min: 20 },
     },
     {
       id: 'D', nome: 'Empurrar', foco: 'Peito, ombro e tríceps',
       exercicios: [
-        ex('supino-inclinado-halteres', 4, 8, 12, 120), ex('desenvolvimento-maquina', 4, 8, 12, 90), ex('crucifixo-maquina', 3, 10, 15, 60),
+        ex('supino-inclinado-halteres', 4, 8, 12, 120, 2), ex('desenvolvimento-maquina', 4, 8, 12, 90, 1), ex('crucifixo-maquina', 3, 10, 15, 60),
         ex('elevacao-lateral', 3, 12, 20, 60), ex('triceps-frances', 3, 10, 12, 60), ex('triceps-maquina', 3, 10, 12, 60),
       ],
       cardio: { tipo: 'continuo', min: 20 },
@@ -161,7 +163,7 @@ const PLANO = {
     {
       id: 'E', nome: 'Puxar', foco: 'Costas, bíceps e condicionamento',
       exercicios: [
-        ex('puxada-neutra', 4, 8, 12, 90), ex('remada-baixa', 3, 8, 12, 90), ex('serrote', 3, 10, 12, 60), ex('crucifixo-inverso', 3, 12, 15, 60),
+        ex('puxada-neutra', 4, 8, 12, 90, 2), ex('remada-baixa', 3, 8, 12, 90), ex('serrote', 3, 10, 12, 60), ex('crucifixo-inverso', 3, 12, 15, 60),
         ex('rosca-45', 3, 10, 15, 60), ex('rosca-martelo', 3, 10, 15, 60), ex('face-pull', 3, 12, 15, 60),
       ],
       cardio: { tipo: 'intervalado', aquec: 180, forte: 60, leve: 60, voltas: 8, aparelho: 'eliptico' },

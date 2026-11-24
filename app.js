@@ -24,7 +24,7 @@ function carregar() {
     if (s && s.plano && Array.isArray(s.sessoes)) {
       const e = { ...estadoInicial(), ...s, planoVersao: s.planoVersao };
       // o plano mudou desde a última vez: troca pelo novo e mantém histórico, anotações e cargas
-      if (e.planoVersao !== PLANO.versao) { e.plano = clone(PLANO); e.proximo = 0; e.planoVersao = PLANO.versao; planoAtualizado = true; }
+      if (e.planoVersao !== PLANO.versao) { if (!(e.planoVersao >= 2)) { e.proximo = 0; planoAtualizado = 'ordem'; } else planoAtualizado = 'ajuste'; e.plano = clone(PLANO); e.planoVersao = PLANO.versao; }
       return e;
     }
   } catch (e) { /* começa do zero */ }
@@ -64,8 +64,9 @@ function estimativa(t, curto) {
   const lista = curto ? t.exercicios.slice(0, 4) : t.exercicios;
   const tipo = fasePlano().tipo;
   const forca = lista.reduce((a, e) => a + seriesDaFase(e.series, tipo) * (e.descanso + 45), 0) / 60;
-  // + 5 min de aquecimento e ~1,5 min de troca de aparelho por exercício
-  return Math.round((forca + 5 + lista.length * 1.5 + cardioMin(t.cardio)) / 5) * 5;
+  // + 4 min de cardio leve, 1 min por série leve e ~1,5 min de troca de aparelho por exercício
+  const leves = lista.reduce((a, e) => a + (e.leves || 0), 0);
+  return Math.round((forca + 4 + leves + lista.length * 1.5 + cardioMin(t.cardio)) / 5) * 5;
 }
 const cardioMin = (c) => (c.tipo === 'intervalado' ? Math.round(((c.aquec || 0) + c.voltas * (c.forte + c.leve)) / 60) : c.min);
 const cardioTexto = (c) => (c.tipo === 'intervalado'
@@ -150,6 +151,14 @@ function tique() {
 setInterval(tique, 250);
 
 /* ---------- Sessão de treino ---------- */
+// Séries leves de aquecimento antes de um exercício (2 no primeiro do treino, 1 quando entra músculo frio)
+const qtdLeves = (it, i) => (it.leves != null ? it.leves : S.atual && S.atual.pers && i === 0 ? 2 : 0);
+const arredKg = (x) => (x >= 10 ? Math.round(x) : Math.round(x * 2) / 2);
+function textoLeve(it, n) {
+  const kg = num(it.sets[0] && it.sets[0].kg), tem = kg != null && kg > 0;
+  if (n >= 2) return tem ? `${fmtNum(arredKg(kg / 2))} kg × 10, depois ${fmtNum(arredKg(kg * 0.75))} kg × 5` : 'metade da carga × 10, depois três quartos da carga × 5';
+  return tem ? `${fmtNum(arredKg(kg / 2))} kg × 8 a 10` : 'metade da carga × 8 a 10';
+}
 // cria o exercício da sessão, já com carga e repetições da última vez em todas as séries
 function montarItem(e) {
   const u = ultima(e.ex), base = clone(e); delete base.sets;
@@ -188,7 +197,7 @@ function substituir(i, novo) {
   const orig = it.original || { ex: it.ex, nome: it.nome, img: it.img, dica: it.dica, grupo: it.grupo, semCarga: it.semCarga, un: it.un, repMin: it.repMin, repMax: it.repMax };
   let { repMin, repMax } = orig;
   if ((novo.un || '') !== (orig.un || '')) [repMin, repMax] = novo.un === 's' ? [30, 45] : [12, 15];
-  const item = montarItem({ ex: novo.ex, nome: novo.nome, img: novo.img || '', dica: novo.dica || '', grupo: novo.grupo || orig.grupo, semCarga: !!novo.semCarga, un: novo.un, series: it.sets.length, descanso: it.descanso, repMin, repMax });
+  const item = montarItem({ ex: novo.ex, nome: novo.nome, img: novo.img || '', dica: novo.dica || '', grupo: novo.grupo || orig.grupo, semCarga: !!novo.semCarga, un: novo.un, series: it.sets.length, descanso: it.descanso, repMin, repMax, leves: qtdLeves(it, i) });
   if (novo.ex !== orig.ex) item.original = orig;
   S.atual.itens[i] = item; salvar();
 }
@@ -240,7 +249,7 @@ function telaHoje() {
 }
 
 function cartaoExercicio(it, i) {
-  const u = ultima(it.ex), feito = it.sets.every((s) => s.ok), semKg = it.un === 's', atual = it.sets.findIndex((s) => !s.ok);
+  const u = ultima(it.ex), feito = it.sets.every((s) => s.ok), semKg = it.un === 's', atual = it.sets.findIndex((s) => !s.ok), nl = qtdLeves(it, i);
   const dica = deveSubir(it)
     ? `<div class="ult sobe"><mark>Bateu ${it.repMax} repetições em todas as séries da última vez: suba a carga hoje.</mark></div>`
     : u ? `<div class="ult">última vez (${esc(fmtData(u.quando))}): ${esc(resumoSets(u.sets, it.un))}</div>`
@@ -250,6 +259,8 @@ function cartaoExercicio(it, i) {
       <span class="nm">${esc(it.nome)}</span><span class="mt mono">${alvo(it)} · descanso ${fmtTempo(it.descanso)}</span></button>
     ${it.original ? `<div class="obs">hoje no lugar de: ${esc(it.original.nome)}</div>` : ''}
     ${dica}${S.notas[it.ex] ? `<div class="obs">nota: ${esc(S.notas[it.ex])}</div>` : ''}
+    ${nl ? `<div class="leve ${it.leveOk ? 'ok' : ''}"><span class="grow"><b class="mono">${nl === 1 ? '1 série leve antes' : '2 séries leves antes'}</b><span id="lv-${i}">${esc(textoLeve(it, nl))}</span></span>
+      <button class="check" data-a="leve-ok" data-i="${i}" aria-label="Marcar séries leves">${it.leveOk ? 'feito ✓' : '✓'}</button></div>` : ''}
     <div class="sets ${semKg ? 'sem-kg' : ''}"><div class="cab mono"><span>série</span>${semKg ? '' : '<span>kg</span>'}<span>${semKg ? 'seg' : 'rep'}</span><span></span></div>
       ${it.sets.map((s, j) => `<div class="set ${s.ok ? 'ok' : j === atual ? 'now' : ''}">
         <span class="n mono">${j + 1}</span>
@@ -286,9 +297,9 @@ function telaTreino() {
     <button class="lnk verm" style="padding-top:4px" data-a="finalizar">finalizar</button></div>
   ${progHTML()}
   ${!a.pers && avisoFase() ? `<p class="fase">${avisoFase()}</p>` : ''}
-  ${a.itens.length ? `<div class="card aquec ${a.aquecOk ? 'feito' : ''}" id="aquec"><div class="row"><div class="grow"><span class="nm">Aquecimento</span><span class="mt mono">3 a 5 min de cardio leve</span></div>
+  ${a.itens.length ? `<div class="card aquec ${a.aquecOk ? 'feito' : ''}" id="aquec"><div class="row"><div class="grow"><span class="nm">Aquecimento</span><span class="mt mono">3 a 5 min de cardio leve (pode encurtar)</span></div>
       <button class="check" data-a="aquec-ok" aria-label="Marcar aquecimento">${a.aquecOk ? 'feito ✓' : '✓'}</button></div>
-    <div class="ult cinza">depois, antes do primeiro exercício: 1 série com metade da carga × 10 e 1 série com três quartos da carga × 5</div></div>` : ''}
+    <div class="ult cinza">o que não deve ser pulado são as séries leves marcadas nas fichas abaixo; alongar antes é opcional (menos de 1 min por músculo)</div></div>` : ''}
   ${a.itens.length ? '' : '<p class="rodape">Este treino está vazio. Adicione os exercícios conforme for fazendo.</p>'}
   ${a.itens.map(cartaoExercicio).join('')}
   <button class="btn" style="width:calc(100% - 4px)" data-a="adicionar-ex">+ adicionar exercício</button>
@@ -420,6 +431,7 @@ function folhaEditar(w, i) {
     <label class="f">Nome<input id="e-nome" value="${esc(e.nome)}"></label>
     <div class="grid2"><label class="f">Séries<input id="e-series" inputmode="numeric" value="${e.series}"></label><label class="f">Descanso (segundos)<input id="e-desc" inputmode="numeric" value="${e.descanso}"></label>
       <label class="f">Repetições mínimas<input id="e-min" inputmode="numeric" value="${e.repMin}"></label><label class="f">Repetições máximas<input id="e-max" inputmode="numeric" value="${e.repMax}"></label></div>
+    <label class="f">Séries leves antes (0, 1 ou 2)<input id="e-leves" inputmode="numeric" value="${e.leves || 0}"></label>
     <div class="stack" style="margin-top:14px"><button class="btn pri" data-a="salvar-ex" data-w="${w}" ${novo ? '' : `data-i="${i}"`}>Salvar</button>
       ${novo ? '' : `<div class="row"><button class="btn grow" data-a="mover" data-w="${w}" data-i="${i}" data-d="-1">↑ Subir</button><button class="btn grow" data-a="mover" data-w="${w}" data-i="${i}" data-d="1">↓ Descer</button></div>
       <button class="btn ghost bad" data-a="remover-ex" data-w="${w}" data-i="${i}">Remover do treino</button>`}
@@ -482,6 +494,7 @@ const acoes = {
   'pers-comecar': () => comecarPersonalizado($('#tp-nome').value.trim()),
   'pers-repetir': (d) => { const s = S.sessoes.find((x) => x.id === +d.id); if (s) comecarPersonalizado(s.nome, s); },
   aparelho: (d) => { S.atual.cardio.aparelho = d.k; salvar(); redesenharCardio(); },
+  'leve-ok': (d) => { const it = S.atual.itens[+d.i]; it.leveOk = !it.leveOk; salvar(); redesenharItem(+d.i); },
   'aquec-ok': () => { S.atual.aquecOk = !S.atual.aquecOk; salvar(); desenhar(); },
   'reiniciar-fase': () => { if (confirm('Recomeçar a contagem das semanas? O próximo treino volta a ser a semana 1 (adaptação).')) { S.planoInicio = null; salvar(); desenhar(); } },
   'cardio-ok': () => { const c = S.atual.cardio; c.ok = !c.ok; if (S.timer && S.timer.cardio) pararTimer(); salvar(); redesenharCardio(); },
@@ -507,8 +520,9 @@ const acoes = {
     const repMin = Math.max(1, Math.round(num($('#e-min').value) || 8)), repMax = Math.max(repMin, Math.round(num($('#e-max').value) || repMin));
     const descanso = Math.min(600, Math.max(10, Math.round(num($('#e-desc').value) || 60)));
     const lista = treinos()[+d.w].exercicios;
-    if (d.i != null) Object.assign(lista[+d.i], { nome, series, repMin, repMax, descanso });
-    else lista.push({ ex: `meu-${Date.now()}`, nome, img: '', series, repMin, repMax, descanso, dica: '' });
+    const leves = Math.min(2, Math.max(0, Math.round(num($('#e-leves').value) || 0)));
+    if (d.i != null) Object.assign(lista[+d.i], { nome, series, repMin, repMax, descanso, leves });
+    else lista.push({ ex: `meu-${Date.now()}`, nome, img: '', series, repMin, repMax, descanso, leves, dica: '' });
     salvar(); fecharFolha(); desenhar();
   },
   mover: (d) => { const l = treinos()[+d.w].exercicios, i = +d.i, j = i + +d.d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; salvar(); desenhar(); folhaEditar(+d.w, j); },
@@ -539,6 +553,7 @@ document.addEventListener('input', (ev) => {
   if ((d.c === 'kg' || d.c === 'reps') && S.atual) {
     // o que for digitado numa série vale também para as séries seguintes ainda não concluídas
     const v = ev.target.value.trim();
+    if (d.c === 'kg' && +d.s === 0) setTimeout(() => { const it = S.atual && S.atual.itens[+d.i], lv = $(`#lv-${d.i}`); if (it && lv) lv.textContent = textoLeve(it, qtdLeves(it, +d.i)); }, 0);
     S.atual.itens[+d.i].sets.forEach((x, k) => {
       if (k === +d.s) x[d.c] = v;
       else if (k > +d.s && !x.ok) { x[d.c] = v; const el = $(`input[data-c="${d.c}"][data-i="${d.i}"][data-s="${k}"]`); if (el) el.value = v; }
@@ -556,7 +571,7 @@ document.addEventListener('change', (ev) => {
       try {
         const n = JSON.parse(r.result);
         if (!n || !n.plano || !Array.isArray(n.plano.treinos) || !Array.isArray(n.sessoes)) throw new Error('formato');
-        if (confirm(`Restaurar este backup (${n.sessoes.length} treinos)? Os dados atuais deste celular serão substituídos.`)) { S = { ...estadoInicial(), ...n, planoVersao: n.planoVersao, atual: null, timer: null }; if (S.planoVersao !== PLANO.versao) { S.plano = clone(PLANO); S.planoVersao = PLANO.versao; S.proximo = 0; } salvar(); desenhar(); aviso('Backup restaurado.'); }
+        if (confirm(`Restaurar este backup (${n.sessoes.length} treinos)? Os dados atuais deste celular serão substituídos.`)) { S = { ...estadoInicial(), ...n, planoVersao: n.planoVersao, atual: null, timer: null }; if (S.planoVersao !== PLANO.versao) { if (!(S.planoVersao >= 2)) S.proximo = 0; S.plano = clone(PLANO); S.planoVersao = PLANO.versao; } salvar(); desenhar(); aviso('Backup restaurado.'); }
       } catch (e) { aviso('Este arquivo não é um backup válido do Sansão.'); }
     };
     r.readAsText(ev.target.files[0]); ev.target.value = '';
@@ -568,4 +583,4 @@ document.addEventListener('focusin', (ev) => { if (ev.target.matches('.set input
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 telaAcesa();
 desenhar();
-if (planoAtualizado) { salvar(); aviso('Treino atualizado: nova ordem de A a E.'); }
+if (planoAtualizado) { salvar(); aviso(planoAtualizado === 'ordem' ? 'Treino atualizado: nova ordem de A a E.' : 'Treino atualizado.'); }
