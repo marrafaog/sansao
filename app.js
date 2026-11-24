@@ -111,14 +111,79 @@ async function telaAcesa() {
     else if (!S.atual && trava) { await trava.release(); trava = null; }
   } catch (e) { /* não suportado */ }
 }
-document.addEventListener('visibilitychange', () => { telaAcesa(); tique(); });
+document.addEventListener('visibilitychange', () => { telaAcesa(); tique(); if (!document.hidden) fecharNotificacoes(); });
+
+/* ---------- Aviso de descanso com o Sansão em segundo plano ----------
+   O Android congela páginas em segundo plano, mas não as que estão tocando áudio. Por isso o descanso toca um áudio
+   silencioso com os bipes já embutidos no fim: o som sai mesmo com outro aplicativo aberto, e o Android mostra o
+   descanso na barra de notificações (Media Session). No fim também vai uma notificação com vibração. */
+const fundo = new Audio();
+let fundoUrl = null;
+fundo.addEventListener('playing', () => { if (S.timer) S.timer.fundo = true; });
+fundo.addEventListener('pause', () => { if (!fundo.ended && S.timer) S.timer.fundo = false; });
+fundo.addEventListener('ended', () => { limparFundo(); tique(); });
+// gera um WAV (8 kHz, 8 bits, mono) de silêncio com bipes nos tempos pedidos
+function wavAviso(marcas, total) {
+  const sr = 8000, n = Math.ceil((total + 1.5) * sr), buf = new ArrayBuffer(44 + n), v = new DataView(buf), b = new Uint8Array(buf);
+  const txt = (o, t) => { for (let k = 0; k < t.length; k++) b[o + k] = t.charCodeAt(k); };
+  txt(0, 'RIFF'); v.setUint32(4, 36 + n, true); txt(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); txt(36, 'data'); v.setUint32(40, n, true);
+  b.fill(128, 44);
+  for (const m of marcas) for (let k = 0; k < m.n; k++) {
+    const ini = Math.round((m.t + k * 0.3) * sr), dur = Math.round(0.22 * sr);
+    for (let x = 0; x < dur && ini + x < n; x++) { if (ini + x < 0) continue; const env = Math.min(1, x / 80, (dur - x) / 400); b[44 + ini + x] = 128 + Math.round(110 * env * Math.sin((2 * Math.PI * m.f * x) / sr)); }
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+function limparFundo() {
+  try { fundo.pause(); fundo.removeAttribute('src'); fundo.load(); } catch (e) { /* sem áudio */ }
+  if (fundoUrl) { URL.revokeObjectURL(fundoUrl); fundoUrl = null; }
+  try { if ('mediaSession' in navigator) { navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; } } catch (e) { /* sem media session */ }
+}
+function tocarFundo() {
+  const T = S.timer; if (!T) return;
+  T.fundo = false;
+  if (S.avisoFundo === false) { limparFundo(); return; }
+  try {
+    const total = T.fases.reduce((a, f) => a + f.dur, 0), dec = (Date.now() - T.inicio) / 1000;
+    if (total - dec < 2) return;
+    const marcas = []; let acc = 0;
+    T.fases.forEach((f, k) => { if (k) marcas.push({ t: acc, n: 2, f: f.forte ? 1040 : 660 }); acc += f.dur; for (let s = 3; s >= 1; s--) marcas.push({ t: acc - s, n: 1, f: 620 }); });
+    marcas.push({ t: total, n: 3, f: 1040 });
+    limparFundo();
+    fundoUrl = URL.createObjectURL(wavAviso(marcas, total)); fundo.src = fundoUrl; fundo.currentTime = Math.max(0, dec);
+    fundo.play().then(() => {
+      if (!('mediaSession' in navigator)) return;
+      const ms = navigator.mediaSession;
+      ms.metadata = new MediaMetadata({ title: `${T.cardio ? 'Cardio' : 'Descanso'} · ${fmtTempo(total)}`, artist: 'Sansão', album: S.atual ? S.atual.nome : '', artwork: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }] });
+      ms.playbackState = 'playing';
+      try { ms.setPositionState({ duration: total + 1.5, position: Math.min(total, Math.max(0, fundo.currentTime)), playbackRate: 1 }); } catch (e) { /* sem barra de progresso */ }
+      ms.setActionHandler('pause', () => {}); ms.setActionHandler('play', () => { fundo.play().catch(() => {}); });
+      try { ms.setActionHandler('nexttrack', () => acoes['t-pular']()); } catch (e) { /* sem botão de pular */ }
+    }).catch(() => { if (S.timer) S.timer.fundo = false; });
+  } catch (e) { /* segue só com o cronômetro da tela */ }
+}
+function pedirPermissaoAviso() { try { if (S.avisoFundo !== false && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch (e) { /* sem notificações */ } }
+function notificar(titulo, corpo) {
+  try {
+    if (S.avisoFundo === false || !document.hidden || !('Notification' in window) || Notification.permission !== 'granted' || !navigator.serviceWorker) return;
+    navigator.serviceWorker.ready.then((r) => r.showNotification(titulo, { body: corpo, tag: 'descanso', renotify: true, vibrate: [300, 150, 300, 150, 300], icon: 'icon-192.png', badge: 'icon-192.png' })).catch(() => {});
+  } catch (e) { /* sem notificações */ }
+}
+function fecharNotificacoes() { try { if (navigator.serviceWorker) navigator.serviceWorker.ready.then((r) => r.getNotifications({ tag: 'descanso' })).then((ns) => ns.forEach((n) => n.close())).catch(() => {}); } catch (e) { /* nada */ } }
+function proximaSerie() {
+  const a = S.atual; if (!a) return '';
+  for (const it of a.itens) { const j = it.sets.findIndex((x) => !x.ok); if (j >= 0) return `Próxima: ${it.nome}, série ${j + 1}`; }
+  return a.cardio.ok || a.cardio.opcional ? 'Treino completo.' : 'Falta o cardio.';
+}
 
 /* ---------- Cronômetro (descanso e cardio) ---------- */
 function iniciarTimer(fases, opts = {}) {
   S.timer = { inicio: Date.now(), fases, cardio: !!opts.cardio, fase: 0, bip: -1 };
-  salvar(); tique();
+  tocarFundo(); salvar(); tique();
 }
-function pararTimer() { S.timer = null; salvar(); $('#timer').hidden = true; }
+// manterSom: no fim natural do tempo o áudio continua por mais um instante, para tocar os bipes finais
+function pararTimer(manterSom) { S.timer = null; if (!manterSom) limparFundo(); salvar(); $('#timer').hidden = true; }
 function tique() {
   const rel = $('#relogio');
   if (rel && S.atual) rel.textContent = fmtTempo((Date.now() - S.atual.inicio) / 1000);
@@ -136,7 +201,9 @@ function tique() {
   const dec = (Date.now() - T.inicio) / 1000;
   if (dec >= total) {
     const eraCardio = T.cardio;
-    pararTimer(); som(3, 1040); vibrar([300, 150, 300, 150, 300]);
+    const comFundo = T.fundo;
+    pararTimer(comFundo); if (!comFundo) som(3, 1040); vibrar([300, 150, 300, 150, 300]);
+    notificar(eraCardio ? 'Cardio concluído' : 'Descanso acabou', eraCardio ? 'Volte ao Sansão para finalizar o treino.' : proximaSerie());
     if (eraCardio && S.atual) { S.atual.cardio.ok = true; salvar(); if (ui.aba === 'hoje') desenhar(); aviso('Cardio concluído!'); }
     else aviso('Descanso acabou. Próxima série!');
     return;
@@ -144,9 +211,9 @@ function tique() {
   let acc = 0, i = 0;
   while (i < T.fases.length - 1 && dec >= acc + T.fases[i].dur) { acc += T.fases[i].dur; i++; }
   const f = T.fases[i], resta = f.dur - (dec - acc);
-  if (i !== T.fase) { T.fase = i; T.bip = -1; som(2, f.forte ? 1040 : 660); vibrar([200, 100, 200]); }
+  if (i !== T.fase) { T.fase = i; T.bip = -1; if (!T.fundo) som(2, f.forte ? 1040 : 660); vibrar([200, 100, 200]); }
   const seg = Math.ceil(resta);
-  if (seg <= 3 && seg !== T.bip) { T.bip = seg; som(1, 620); }
+  if (seg <= 3 && seg !== T.bip) { T.bip = seg; if (!T.fundo) som(1, 620); }
   const multi = T.fases.length > 1;
   el.hidden = false;
   el.className = f.forte ? 'forte' : '';
@@ -176,6 +243,7 @@ function comecar(idx, curto) {
   const t = treinos()[idx];
   const lista = curto ? t.exercicios.slice(0, 4) : t.exercicios;
   if (!S.planoInicio) S.planoInicio = Date.now();
+  pedirPermissaoAviso();
   const fase = fasePlano().tipo;
   S.atual = {
     id: Date.now(), idx, treino: t.id, nome: t.nome, foco: t.foco, inicio: Date.now(), curto: !!curto,
@@ -371,6 +439,8 @@ function telaTreinos() {
     <button class="link" data-a="novo-ex" data-w="${w}">+ adicionar exercício</button></div>`).join('')}
   <div class="card"><h2>Fase do plano</h2><div class="mut small">${S.planoInicio ? `Começou em ${esc(fmtData(S.planoInicio))}. Você está na semana ${fasePlano().sem}.` : 'A contagem começa no primeiro treino.'} Semanas 1 e 2: adaptação, com uma série a menos. Semana 6: alívio, com metade das séries. O plano vale por 8 a 12 semanas.</div>
     ${S.planoInicio ? '<button class="link" data-a="reiniciar-fase">recomeçar a contagem das semanas</button>' : ''}</div>
+  <div class="card"><h2>Aviso de descanso</h2><div class="mut small">Com o aviso ligado, o descanso aparece na barra de notificações e o bipe toca mesmo com outro aplicativo aberto. Se ele pausar a música de outro aplicativo, desligue aqui.</div>
+    <button class="btn" style="margin-top:10px" data-a="aviso-fundo">${S.avisoFundo === false ? 'Desligado · tocar para ligar' : 'Ligado · tocar para desligar'}</button></div>
   <div class="card"><h2>Backup</h2><div class="mut small">Os dados ficam só neste celular. Salve um arquivo de backup de vez em quando.</div>
     <div class="stack" style="margin-top:10px"><button class="btn" data-a="exportar">Salvar backup</button>
       <label class="btn ghost">Restaurar backup<input type="file" accept="application/json,.json" data-c="importar" hidden></label>
@@ -520,6 +590,7 @@ const acoes = {
       redesenharItem(i); tique();
     }
   },
+  'aviso-fundo': () => { S.avisoFundo = S.avisoFundo === false; salvar(); if (S.avisoFundo) pedirPermissaoAviso(); else limparFundo(); desenhar(); },
   'leve-ok': (d) => { const it = S.atual.itens[+d.i]; it.leveOk = !it.leveOk; salvar(); redesenharItem(+d.i); },
   'aquec-ok': () => { S.atual.aquecOk = !S.atual.aquecOk; salvar(); desenhar(); },
   'reiniciar-fase': () => { if (confirm('Recomeçar a contagem das semanas? O próximo treino volta a ser a semana 1 (adaptação).')) { S.planoInicio = null; salvar(); desenhar(); } },
@@ -532,8 +603,8 @@ const acoes = {
     } else iniciarTimer([{ rot: `Cardio · ${ap}`, dur: c.min * 60 }], { cardio: true });
     som(1, 880); redesenharCardio();
   },
-  't-mais': () => { if (S.timer) { S.timer.fases[0].dur += 15; salvar(); tique(); } },
-  't-menos': () => { if (S.timer) { S.timer.fases[0].dur = Math.max(1, S.timer.fases[0].dur - 15); salvar(); tique(); } },
+  't-mais': () => { if (S.timer) { S.timer.fases[0].dur += 15; tocarFundo(); salvar(); tique(); } },
+  't-menos': () => { if (S.timer) { S.timer.fases[0].dur = Math.max(1, S.timer.fases[0].dur - 15); tocarFundo(); salvar(); tique(); } },
   't-pular': () => { const c = S.timer && S.timer.cardio; pararTimer(); if (c) redesenharCardio(); },
   hist: (d) => { ui.hist = ui.hist === +d.id ? null : +d.id; desenhar(); },
   'apagar-sessao': (d) => { if (confirm('Apagar este treino do histórico? Não dá para desfazer.')) { S.sessoes = S.sessoes.filter((s) => s.id !== +d.id); salvar(); desenhar(); } },

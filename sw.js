@@ -1,4 +1,4 @@
-const VERSAO = 'sansao-v4';
+const VERSAO = 'sansao-v5';
 const ARQUIVOS = ['./', 'index.html', 'styles.css', 'data.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'fonts/fraunces-italico.woff2',
   'fonts/fraunces.woff2',
@@ -172,6 +172,11 @@ const ARQUIVOS = ['./', 'index.html', 'styles.css', 'data.js', 'app.js', 'manife
 ];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSAO).then((c) => c.addAll(ARQUIVOS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== VERSAO).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
+// tocar na notificação de fim de descanso traz o Sansão para a frente
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => (cs.length ? cs[0].focus() : self.clients.openWindow('./'))));
+});
 self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
