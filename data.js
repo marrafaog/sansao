@@ -126,13 +126,14 @@ const ex = (id, series, repMin, repMax, descanso, leves = 0) => ({ ex: id, ...CA
 
 // versao: ao mudar o plano, aumente este número para os celulares receberem o plano novo
 const PLANO = {
-  versao: 3,
+  versao: 4,
   treinos: [
     {
       id: 'A', nome: 'Pernas', foco: 'Frente da coxa e abdômen',
       exercicios: [
-        ex('leg-press', 4, 8, 12, 120, 2), ex('extensora', 4, 10, 15, 60), ex('flexora', 3, 10, 12, 60, 1), ex('gemeos-pe', 4, 10, 15, 60),
-        ex('abdominal-infra', 3, 10, 15, 45), ex('prancha', 3, 30, 45, 45), ex('hiperextensao', 3, 10, 12, 60),
+        // gêmeos logo depois do leg press, para aproveitar o mesmo aparelho
+        ex('leg-press', 4, 8, 12, 120, 2), ex('gemeos-leg-press', 4, 10, 15, 60), ex('extensora', 4, 10, 15, 60), ex('flexora', 3, 10, 12, 60, 1),
+        ex('abdominal-maquina', 3, 10, 15, 45), ex('prancha', 3, 30, 45, 45), ex('hiperextensao', 3, 10, 12, 60),
       ],
       cardio: { tipo: 'continuo', min: 25 },
     },

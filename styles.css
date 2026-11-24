@@ -128,6 +128,9 @@ mark { background: linear-gradient(transparent 55%, var(--mark) 55%); color: inh
 .set input:focus { outline: 3px solid var(--mark); outline-offset: 0; border-color: var(--ink); background: #fff; color: var(--ink); }
 .set.ok input { border-color: transparent; }
 .set.ok .check { border-color: transparent; color: var(--red); font-family: 'Fraunces', serif; font-style: italic; font-weight: 500; font-size: 17px; transform: rotate(-6deg); }
+.crono { margin-top: 12px; width: 100%; }
+.crono.pri { width: calc(100% - 4px); }
+#crono-t { font-size: 22px; font-variant-numeric: tabular-nums; }
 .acts { display: flex; justify-content: space-between; align-items: center; padding-top: 2px; margin-bottom: -8px; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--ink); margin-top: 12px; }
 .seg button { min-height: 44px; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }

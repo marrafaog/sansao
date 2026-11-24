@@ -122,6 +122,14 @@ function pararTimer() { S.timer = null; salvar(); $('#timer').hidden = true; }
 function tique() {
   const rel = $('#relogio');
   if (rel && S.atual) rel.textContent = fmtTempo((Date.now() - S.atual.inicio) / 1000);
+  // cronômetro de execução: conta para cima e apita ao chegar no mínimo e no máximo da faixa
+  const C = S.crono, it = C && S.atual && S.atual.itens[C.i];
+  if (it) {
+    const seg = (Date.now() - C.inicio) / 1000, ct = $('#crono-t');
+    if (ct) ct.textContent = fmtTempo(seg);
+    if (C.bip < 1 && seg >= it.repMin) { C.bip = 1; som(1, 880); vibrar(200); }
+    if (C.bip < 2 && seg >= it.repMax) { C.bip = 2; som(2, 1040); vibrar([200, 100, 200]); }
+  }
   const T = S.timer, el = $('#timer');
   if (!T) { if (!el.hidden) el.hidden = true; return; }
   const total = T.fases.reduce((a, f) => a + f.dur, 0);
@@ -214,7 +222,7 @@ function finalizar() {
   a.itens = a.itens.map((it) => ({ ...it, sets: it.sets.filter((s) => s.ok) })).filter((it) => it.sets.length);
   S.sessoes.push(a);
   if (a.idx != null) S.proximo = (a.idx + 1) % treinos().length;
-  S.atual = null; pararTimer(); salvar(); telaAcesa();
+  S.atual = null; S.crono = null; pararTimer(); salvar(); telaAcesa();
   ui.aba = 'historico'; ui.hist = a.id; desenhar(); window.scrollTo(0, 0);
   aviso('Treino salvo. Boa!');
 }
@@ -268,6 +276,9 @@ function cartaoExercicio(it, i) {
         <input class="mono" inputmode="numeric" data-c="reps" data-i="${i}" data-s="${j}" value="${esc(s.reps)}" placeholder="${it.repMin}–${it.repMax}" aria-label="${semKg ? 'Segundos' : 'Repetições'} da série ${j + 1}">
         <button class="check" data-a="ok" data-i="${i}" data-s="${j}" aria-label="${s.ok ? 'Desmarcar' : 'Concluir'} série ${j + 1}">${s.ok ? 'feito ✓' : '✓'}</button>
       </div>`).join('')}</div>
+    ${semKg && !feito ? (S.crono && S.crono.i === i
+      ? `<button class="btn pri crono" data-a="crono" data-i="${i}"><span id="crono-t">00:00</span> · parar e marcar a série</button>`
+      : `<button class="btn crono" data-a="crono" data-i="${i}">▶ Cronometrar a série ${atual + 1}</button>`) : ''}
     <div class="acts"><span><button class="lnk" data-a="mais-serie" data-i="${i}">+ série</button>${it.sets.length > 1 ? ` · <button class="lnk" data-a="menos-serie" data-i="${i}">− série</button>` : ''}</span>
       <button class="lnk verm" data-a="trocar" data-i="${i}">trocar exercício</button></div>
   </div>`;
@@ -465,7 +476,7 @@ const acoes = {
   escolher: (d) => { ui.escolha = +d.i; desenhar(); },
   comecar: (d) => comecar(+d.i, !!d.curto),
   finalizar,
-  descartar: () => { if (confirm('Cancelar este treino? O que foi marcado hoje será perdido.')) { S.atual = null; pararTimer(); salvar(); telaAcesa(); desenhar(); window.scrollTo(0, 0); } },
+  descartar: () => { if (confirm('Cancelar este treino? O que foi marcado hoje será perdido.')) { S.atual = null; S.crono = null; pararTimer(); salvar(); telaAcesa(); desenhar(); window.scrollTo(0, 0); } },
   detalhe: (d) => folhaDetalhe(+d.i),
   fechar: () => { fecharFolha(); if (S.atual && ui.aba === 'hoje') desenhar(); },
   ok: (d) => {
@@ -494,6 +505,21 @@ const acoes = {
   'pers-comecar': () => comecarPersonalizado($('#tp-nome').value.trim()),
   'pers-repetir': (d) => { const s = S.sessoes.find((x) => x.id === +d.id); if (s) comecarPersonalizado(s.nome, s); },
   aparelho: (d) => { S.atual.cardio.aparelho = d.k; salvar(); redesenharCardio(); },
+  crono: (d) => {
+    const i = +d.i, it = S.atual.itens[i];
+    if (S.crono && S.crono.i === i) {
+      // parar: grava os segundos na série da vez, marca como feita e começa o descanso
+      const seg = Math.max(1, Math.round((Date.now() - S.crono.inicio) / 1000)), j = it.sets.findIndex((x) => !x.ok);
+      S.crono = null;
+      if (j < 0) { salvar(); redesenharItem(i); return; }
+      it.sets[j].reps = String(seg); salvar(); acoes.ok({ i: String(i), s: String(j) });
+    } else {
+      const outro = S.crono ? S.crono.i : null;
+      pararTimer(); S.crono = { i, inicio: Date.now(), bip: 0 }; salvar(); som(1, 660);
+      if (outro != null) redesenharItem(outro);
+      redesenharItem(i); tique();
+    }
+  },
   'leve-ok': (d) => { const it = S.atual.itens[+d.i]; it.leveOk = !it.leveOk; salvar(); redesenharItem(+d.i); },
   'aquec-ok': () => { S.atual.aquecOk = !S.atual.aquecOk; salvar(); desenhar(); },
   'reiniciar-fase': () => { if (confirm('Recomeçar a contagem das semanas? O próximo treino volta a ser a semana 1 (adaptação).')) { S.planoInicio = null; salvar(); desenhar(); } },
