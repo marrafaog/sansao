@@ -51,7 +51,7 @@ mark { background: linear-gradient(transparent 55%, var(--mark) 55%); color: inh
 .abas button.on { background: var(--card); opacity: 1; height: 52px; margin-bottom: -2px; }
 .abas button.mais { font-family: var(--mono); font-weight: 500; color: var(--red); }
 .ficha { position: relative; padding-top: 20px; }
-.kick { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); }
+.kick { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); padding-right: 96px; }
 .tt { font-size: 56px; line-height: 1; margin-top: 2px; }
 .st { font-style: italic; font-size: 21px; margin-top: 6px; line-height: 1.25; }
 .st.small { font-size: 16px; margin-top: 2px; }
