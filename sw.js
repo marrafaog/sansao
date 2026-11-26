@@ -1,4 +1,4 @@
-const VERSAO = 'sansao-v6';
+const VERSAO = 'sansao-v7';
 const ARQUIVOS = ['./', 'index.html', 'styles.css', 'data.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'fonts/fraunces-italico.woff2',
   'fonts/fraunces.woff2',

@@ -15,7 +15,7 @@ const minuscula = (t) => t.charAt(0).toLowerCase() + t.slice(1);
 
 /* ---------- Estado ---------- */
 function estadoInicial() {
-  return { v: 1, plano: clone(PLANO), planoVersao: PLANO.versao, planoInicio: null, proximo: 0, sessoes: [], atual: null, notas: {}, timer: null };
+  return { v: 1, plano: clone(PLANO), planoVersao: PLANO.versao, planoInicio: null, proximo: 0, sessoes: [], atual: null, notas: {}, timer: null, medidas: [], altura: 174 };
 }
 let planoAtualizado = false;
 const valido = (s) => s && s.plano && Array.isArray(s.sessoes);
@@ -36,7 +36,10 @@ function mesclar(a, b) {
   const apagadas = [...new Set([...(a.apagadas || []), ...(b.apagadas || [])])];
   const porId = new Map(); [...outro.sessoes, ...base.sessoes].forEach((s) => porId.set(s.id, s));
   const sessoes = [...porId.values()].filter((s) => !apagadas.includes(s.id)).sort((x, y) => x.fim - y.fim);
-  const m = { ...base, sessoes, apagadas, notas: { ...(outro.notas || {}), ...(base.notas || {}) }, rev: Math.max(a.rev || 0, b.rev || 0) };
+  const medApag = [...new Set([...(a.medidasApagadas || []), ...(b.medidasApagadas || [])])];
+  const medPorId = new Map(); [...(outro.medidas || []), ...(base.medidas || [])].forEach((x) => medPorId.set(x.id, x));
+  const medidas = [...medPorId.values()].filter((x) => !medApag.includes(x.id)).sort((x, y) => x.data - y.data);
+  const m = { ...base, sessoes, apagadas, medidas, medidasApagadas: medApag, notas: { ...(outro.notas || {}), ...(base.notas || {}) }, rev: Math.max(a.rev || 0, b.rev || 0) };
   const ult = sessoes[sessoes.length - 1];
   if (ult && ult.idx != null && !base.sessoes.some((s) => s.id === ult.id)) m.proximo = (ult.idx + 1) % m.plano.treinos.length;
   if (m.atual && sessoes.some((s) => s.id === m.atual.id)) m.atual = null;
@@ -185,8 +188,8 @@ function notificar(titulo, corpo) {
 function fecharNotificacoes() { try { if (navigator.serviceWorker) navigator.serviceWorker.ready.then((r) => r.getNotifications({ tag: 'descanso' })).then((ns) => ns.forEach((n) => n.close())).catch(() => {}); } catch (e) { /* nada */ } }
 function proximaSerie() {
   const a = S.atual; if (!a) return '';
-  for (const it of a.itens) { const j = it.sets.findIndex((x) => !x.ok); if (j >= 0) return `Próxima: ${it.nome}, série ${j + 1}`; }
-  return a.cardio.ok || a.cardio.opcional ? 'Treino completo.' : 'Falta o cardio.';
+  for (const it of a.itens) { if (it.pulado) continue; const j = it.sets.findIndex((x) => !x.ok); if (j >= 0) return `Próxima: ${it.nome}, série ${j + 1}`; }
+  return a.cardio.ok || a.cardio.pulado || a.cardio.opcional ? 'Treino completo.' : 'Falta o cardio.';
 }
 
 /* ---------- Cronômetro (descanso e cardio) ---------- */
@@ -292,14 +295,15 @@ function substituir(i, novo) {
 function finalizar() {
   const a = S.atual; if (!a) return;
   const feitas = a.itens.reduce((n, it) => n + it.sets.filter((s) => s.ok).length, 0);
-  const total = a.itens.reduce((n, it) => n + it.sets.length, 0);
+  const total = a.itens.reduce((n, it) => n + (it.pulado ? it.sets.filter((s) => s.ok).length : it.sets.length), 0);
   if (!feitas && !a.cardio.ok) {
     if (confirm('Nenhuma série foi marcada. Sair sem salvar este treino?')) { S.atual = null; pararTimer(); salvar(); telaAcesa(); desenhar(); }
     return;
   }
-  if ((feitas < total || (!a.cardio.ok && !a.cardio.opcional)) && !confirm('Ainda há séries ou cardio sem marcar. Finalizar mesmo assim?')) return;
+  if ((feitas < total || (!a.cardio.ok && !a.cardio.opcional && !a.cardio.pulado)) && !confirm('Ainda há séries ou cardio sem marcar. Finalizar mesmo assim? O que não foi marcado não entra no histórico.')) return;
   a.fim = Date.now();
   a.itens = a.itens.map((it) => ({ ...it, sets: it.sets.filter((s) => s.ok) })).filter((it) => it.sets.length);
+  if (!a.cardio.ok) a.cardio.pulado = true;
   S.sessoes.push(a);
   if (a.idx != null) S.proximo = (a.idx + 1) % treinos().length;
   S.atual = null; S.crono = null; pararTimer(); salvar(); telaAcesa();
@@ -337,6 +341,12 @@ function telaHoje() {
 }
 
 function cartaoExercicio(it, i) {
+  if (it.pulado) {
+    const k = it.sets.filter((s) => s.ok).length;
+    return `<div class="card ex pulado" id="it-${i}"><div class="row"><div class="grow"><span class="nm">${esc(it.nome)}</span>
+      <span class="mt mono">pulado hoje${k ? ` · ${k} série${k > 1 ? 's' : ''} feita${k > 1 ? 's' : ''} fica${k > 1 ? 'm' : ''} no histórico` : ''}</span></div>
+      <button class="lnk" data-a="pular" data-i="${i}">desfazer</button></div></div>`;
+  }
   const u = ultima(it.ex), feito = it.sets.every((s) => s.ok), semKg = it.un === 's', atual = it.sets.findIndex((s) => !s.ok), nl = qtdLeves(it, i);
   const dica = deveSubir(it)
     ? `<div class="ult sobe"><mark>Bateu ${it.repMax} repetições em todas as séries da última vez: suba a carga hoje.</mark></div>`
@@ -348,48 +358,53 @@ function cartaoExercicio(it, i) {
     ${it.original ? `<div class="obs">hoje no lugar de: ${esc(it.original.nome)}</div>` : ''}
     ${dica}${S.notas[it.ex] ? `<div class="obs">nota: ${esc(S.notas[it.ex])}</div>` : ''}
     ${nl ? `<div class="leve ${it.leveOk ? 'ok' : ''}"><span class="grow"><b class="mono">${nl === 1 ? '1 série leve antes' : '2 séries leves antes'}</b><span id="lv-${i}">${esc(textoLeve(it, nl))}</span></span>
-      <button class="check" data-a="leve-ok" data-i="${i}" aria-label="Marcar séries leves">${it.leveOk ? 'feito ✓' : '✓'}</button></div>` : ''}
+      <button class="check ${it.leveOk ? 'carimbo-ok' : ''}" data-a="leve-ok" data-i="${i}" aria-label="${it.leveOk ? 'Desmarcar' : 'Marcar'} séries leves">✓</button></div>` : ''}
     <div class="sets ${semKg ? 'sem-kg' : ''}"><div class="cab mono"><span>série</span>${semKg ? '' : '<span>kg</span>'}<span>${semKg ? 'seg' : 'rep'}</span><span></span></div>
       ${it.sets.map((s, j) => `<div class="set ${s.ok ? 'ok' : j === atual ? 'now' : ''}">
         <span class="n mono">${j + 1}</span>
         ${semKg ? '' : `<input class="mono" inputmode="decimal" data-c="kg" data-i="${i}" data-s="${j}" value="${esc(s.kg)}" placeholder="${it.semCarga ? '–' : '0'}" aria-label="Carga da série ${j + 1}">`}
         <input class="mono" inputmode="numeric" data-c="reps" data-i="${i}" data-s="${j}" value="${esc(s.reps)}" placeholder="${it.repMin}–${it.repMax}" aria-label="${semKg ? 'Segundos' : 'Repetições'} da série ${j + 1}">
-        <button class="check" data-a="ok" data-i="${i}" data-s="${j}" aria-label="${s.ok ? 'Desmarcar' : 'Concluir'} série ${j + 1}">${s.ok ? 'feito ✓' : '✓'}</button>
+        <button class="check ${s.ok ? 'carimbo-ok' : ''}" data-a="ok" data-i="${i}" data-s="${j}" aria-label="${s.ok ? 'Desmarcar' : 'Concluir'} série ${j + 1}">✓</button>
       </div>`).join('')}</div>
     ${semKg && !feito ? (S.crono && S.crono.i === i
       ? `<button class="btn pri crono" data-a="crono" data-i="${i}"><span id="crono-t">00:00</span> · parar e marcar a série</button>`
       : `<button class="btn crono" data-a="crono" data-i="${i}">▶ Cronometrar a série ${atual + 1}</button>`) : ''}
     <div class="acts"><span><button class="lnk" data-a="mais-serie" data-i="${i}">+ série</button>${it.sets.length > 1 ? ` · <button class="lnk" data-a="menos-serie" data-i="${i}">− série</button>` : ''}</span>
-      <button class="lnk verm" data-a="trocar" data-i="${i}">trocar exercício</button></div>
+      <span>${feito ? '' : `<button class="lnk" data-a="pular" data-i="${i}">pular</button> · `}<button class="lnk verm" data-a="trocar" data-i="${i}">trocar</button></span></div>
   </div>`;
 }
 function cartaoCardio() {
   const c = S.atual.cardio, rodando = S.timer && S.timer.cardio;
+  if (c.pulado) return `<div class="card ex pulado" id="cardio"><div class="row"><div class="grow"><span class="nm">Cardio</span><span class="mt mono">pulado hoje · não entra no histórico</span></div>
+    <button class="lnk" data-a="cardio-pular">desfazer</button></div></div>`;
   return `<div class="card ex ${c.ok ? 'feito' : ''}" id="cardio">
     <div class="exhead"><span class="pola">${anim(c.aparelho)}</span><span class="nm">Cardio</span><span class="mt mono">${esc(cardioTexto(c))}${c.opcional ? ' · opcional' : ''}</span></div>
     <div class="seg">${Object.entries(APARELHOS).map(([k, v]) => `<button class="${c.aparelho === k ? 'on' : ''}" data-a="aparelho" data-k="${k}">${v}</button>`).join('')}</div>
     <div class="ult cinza">${c.tipo === 'intervalado' ? 'no trecho forte não deve dar para conversar; no leve, recupere o fôlego' : 'respiração acelerada, mas ainda dá para falar frases curtas; a cada 2 semanas, suba um pouco a inclinação ou o ritmo'}</div>
     <div class="row" style="margin-top:12px"><button class="btn ${c.ok ? '' : 'pri'} grow" data-a="cardio-iniciar">${rodando ? 'Reiniciar cronômetro' : 'Iniciar cronômetro'}</button>
       <button class="btn estreito" style="min-height:60px" data-a="cardio-ok">${c.ok ? 'desmarcar' : 'já fiz ✓'}</button></div>
+    ${c.ok ? '' : '<div class="acts"><span></span><button class="lnk" data-a="cardio-pular">pular o cardio hoje</button></div>'}
   </div>`;
 }
 // linha de progresso: um quadradinho por exercício (cheio = feito) e um círculo para o cardio
+// linha de progresso: um quadradinho por exercício (cheio = feito, × = pulado) e um círculo para o cardio
 function progHTML() {
   const a = S.atual, n = a.itens.length;
-  const q = a.itens.map((it) => { const k = it.sets.filter((x) => x.ok).length; return k === it.sets.length ? '■' : k ? '◧' : '□'; }).join('');
-  const prox = a.itens.findIndex((it) => it.sets.some((x) => !x.ok));
-  const txt = !n ? 'Nenhum exercício ainda' : prox >= 0 ? `Exercício ${prox + 1} de ${n}` : a.cardio.ok || a.cardio.opcional ? 'Tudo feito' : 'Falta o cardio';
-  return `<div class="pr mono" id="prog"><span>${txt}</span><b>${q}${a.cardio.opcional ? '' : a.cardio.ok ? ' ●' : ' ○'}</b></div>`;
+  const q = a.itens.map((it) => { if (it.pulado) return '×'; const k = it.sets.filter((x) => x.ok).length; return k === it.sets.length ? '■' : k ? '◧' : '□'; }).join('');
+  const prox = a.itens.findIndex((it) => !it.pulado && it.sets.some((x) => !x.ok));
+  const cardioFeito = a.cardio.ok || a.cardio.pulado || a.cardio.opcional;
+  const txt = !n ? 'Nenhum exercício ainda' : prox >= 0 ? `Exercício ${prox + 1} de ${n}` : cardioFeito ? 'Tudo feito' : 'Falta o cardio';
+  return `<div class="pr mono" id="prog"><span>${txt}</span><b>${q}${a.cardio.opcional ? '' : a.cardio.pulado ? ' ×' : a.cardio.ok ? ' ●' : ' ○'}</b></div>`;
 }
 function telaTreino() {
   const a = S.atual;
   return `<div class="top"><div><h1 class="a">${a.pers ? esc(a.nome) : `Treino ${esc(a.treino)}`} <span class="mono rel">· <span id="relogio">00:00</span></span></h1>
       <div class="st small">${a.pers ? 'treino personalizado' : `${esc(a.nome)}, ${esc(minuscula(a.foco))}`}${a.curto ? ' (curto)' : ''}</div></div>
-    <button class="lnk verm" style="padding-top:4px" data-a="finalizar">finalizar</button></div>
+    <button class="fim-btn mono" data-a="finalizar">Finalizar<span>✓</span></button></div>
   ${progHTML()}
   ${!a.pers && avisoFase() ? `<p class="fase">${avisoFase()}</p>` : ''}
   ${a.itens.length ? `<div class="card aquec ${a.aquecOk ? 'feito' : ''}" id="aquec"><div class="row"><div class="grow"><span class="nm">Aquecimento</span><span class="mt mono">3 a 5 min de cardio leve (pode encurtar)</span></div>
-      <button class="check" data-a="aquec-ok" aria-label="Marcar aquecimento">${a.aquecOk ? 'feito ✓' : '✓'}</button></div>
+      <button class="check ${a.aquecOk ? 'carimbo-ok' : ''}" data-a="aquec-ok" aria-label="${a.aquecOk ? 'Desmarcar' : 'Marcar'} aquecimento">✓</button></div>
     <div class="ult cinza">o que não deve ser pulado são as séries leves marcadas nas fichas abaixo; alongar antes é opcional (menos de 1 min por músculo)</div></div>` : ''}
   ${a.itens.length ? '' : '<p class="rodape">Este treino está vazio. Adicione os exercícios conforme for fazendo.</p>'}
   ${a.itens.map(cartaoExercicio).join('')}
@@ -407,7 +422,8 @@ function telaHistorico() {
     return `<div class="card"><button class="exhead" data-a="hist" data-id="${s.id}"><span class="tag">${esc(s.treino)}</span>
         <span class="grow"><span class="nome">${esc(s.nome)}${s.curto ? ' (curto)' : ''}</span><br><span class="mut small">${esc(fmtData(s.fim))} · ${fmtDur(s.fim - s.inicio)} · ${series} séries${s.cardio && s.cardio.ok ? ' · cardio ✓' : ''}</span></span><span class="mono mut">${aberto ? '−' : '+'}</span></button>
       ${aberto ? `<div style="margin-top:10px">${s.itens.map((it) => `<div class="item"><b>${esc(it.nome)}</b><span class="mut" style="text-align:right">${esc(resumoSets(it.sets, it.un))}</span></div>`).join('')}
-        ${s.cardio && s.cardio.ok ? `<div class="item"><b>Cardio</b><span class="mut">${esc(APARELHOS[s.cardio.aparelho] || '')}, ${cardioMin(s.cardio)} min</span></div>` : ''}
+        ${s.cardio && s.cardio.ok ? `<div class="item"><b>Cardio</b><span class="mut">${esc(APARELHOS[s.cardio.aparelho] || '')}, ${cardioMin(s.cardio)} min</span></div>
+        <button class="link" data-a="hist-sem-cardio" data-id="${s.id}">não fiz o cardio neste dia</button>` : ''}
         <button class="link bad" data-a="apagar-sessao" data-id="${s.id}">Apagar este treino</button></div>` : ''}</div>`;
   }).join('')}`;
 }
@@ -422,6 +438,7 @@ function telaEvolucao() {
   const sel = ids.includes(ui.evo) ? ui.evo : ids[0];
   const pts = !sel ? [] : S.sessoes.map((s) => { const it = s.itens.find((x) => x.ex === sel); if (!it) return null; const ks = it.sets.map((x) => num(x.kg)).filter((k) => k != null); return ks.length ? { t: s.fim, kg: Math.max(...ks), sets: it.sets } : null; }).filter(Boolean);
   return `<div class="top"><h1>Evolução</h1></div>
+  ${cartaoCorpo()}
   <div class="card"><b>Treinos por semana</b><div class="mut small">Últimas 8 semanas · meta: 5</div>
     <div class="bars">${semanas.map((w) => `<div><span>${w.n || ''}</span><i style="height:${(70 * w.n) / mx}px"></i><span>${new Date(w.ini).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span></div>`).join('')}</div></div>
   <div class="card"><b>Carga por exercício</b>
@@ -431,16 +448,17 @@ function telaEvolucao() {
     <div style="margin-top:8px">${[...pts].reverse().slice(0, 8).map((p) => `<div class="item"><span>${esc(fmtData(p.t))}</span><span class="mut">${esc(resumoSets(p.sets))}</span></div>`).join('')}</div>`}
   </div>`;
 }
-function grafico(pts) {
-  if (pts.length < 2) return `<p class="rodape">${pts.length ? `Maior carga até agora: ${fmtNum(pts[0].kg)} kg. O gráfico aparece a partir do segundo treino.` : ''}</p>`;
+function grafico(pts, un = 'kg', rot = 'treinos') {
+  const U = un.toUpperCase();
+  if (pts.length < 2) return `<p class="rodape">${pts.length ? `Até agora: ${fmtNum(pts[0].kg)} ${un}. O gráfico aparece a partir do segundo registro.` : ''}</p>`;
   const W = 320, H = 150, pad = 26, ks = pts.map((p) => p.kg), lo = Math.min(...ks), hi = Math.max(...ks), amp = hi - lo || 1;
   const xy = pts.map((p, i) => [pad + (i * (W - 2 * pad)) / (pts.length - 1), H - pad - ((p.kg - lo) / amp) * (H - 2 * pad)]);
   const fonte = "font-family=\"'Plex Mono', monospace\" font-size=\"10.5\" fill=\"#6f6858\"";
-  return `<svg class="graf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de carga">
+  return `<svg class="graf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico">
     <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#1d1b18" stroke-width="1.5"/>
     <polyline fill="none" stroke="#1d1b18" stroke-width="2.5" stroke-linejoin="round" points="${xy.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' ')}"/>
     ${xy.map((p) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4" fill="#d4402b" stroke="#fbf7ee" stroke-width="1.5"/>`).join('')}
-    <text x="${pad}" y="14" ${fonte}>MÁX. ${fmtNum(hi)} KG</text><text x="${pad}" y="${H - 8}" ${fonte}>MÍN. ${fmtNum(lo)} KG · ${pts.length} TREINOS</text></svg>`;
+    <text x="${pad}" y="14" ${fonte}>MÁX. ${fmtNum(hi)} ${U}</text><text x="${pad}" y="${H - 8}" ${fonte}>MÍN. ${fmtNum(lo)} ${U} · ${pts.length} ${rot.toUpperCase()}</text></svg>`;
 }
 
 function telaTreinos() {
@@ -451,13 +469,65 @@ function telaTreinos() {
     <button class="link" data-a="novo-ex" data-w="${w}">+ adicionar exercício</button></div>`).join('')}
   <div class="card"><h2>Fase do plano</h2><div class="mut small">${S.planoInicio ? `Começou em ${esc(fmtData(S.planoInicio))}. Você está na semana ${fasePlano().sem}.` : 'A contagem começa no primeiro treino.'} Semanas 1 e 2: adaptação, com uma série a menos. Semana 6: alívio, com metade das séries. O plano vale por 8 a 12 semanas.</div>
     ${S.planoInicio ? '<button class="link" data-a="reiniciar-fase">recomeçar a contagem das semanas</button>' : ''}</div>
+  <div class="card"><h2>Plano original</h2><div class="mut small">Desfaz as edições que você fez nos treinos A a E. O histórico continua.</div>
+    <button class="btn ghost bad" style="margin-top:10px" data-a="plano-original">Voltar ao plano de treino original</button></div>`;
+}
+
+function telaAjustes() {
+  return `<div class="top"><h1>Ajustes</h1></div>
   <div class="card"><h2>Aviso de descanso</h2><div class="mut small">Com o aviso ligado, quando você sai do Sansão durante o descanso aparece uma notificação com o tempo que falta, e no fim ela vibra e toca o som de notificação. Não mexe na música.</div>
     ${permissaoTexto()}
     <button class="btn" style="margin-top:10px" data-a="aviso-fundo">${S.avisoFundo === false ? 'Desligado · tocar para ligar' : 'Ligado · tocar para desligar'}</button></div>
-  <div class="card"><h2>Backup</h2><div class="mut small">Os dados ficam só neste celular. Salve um arquivo de backup de vez em quando.</div>
+  <div class="card"><h2>Backup</h2><div class="mut small">Os dados ficam só neste celular. Salve um arquivo de backup no fim de cada semana.${S.ultimoBackup ? ` Último: ${esc(fmtData(S.ultimoBackup))}.` : ''}</div>
     <div class="stack" style="margin-top:10px"><button class="btn" data-a="exportar">Salvar backup</button>
-      <label class="btn ghost">Restaurar backup<input type="file" accept="application/json,.json" data-c="importar" hidden></label>
-      <button class="btn ghost bad" data-a="plano-original">Voltar ao plano de treino original</button></div></div>`;
+      <label class="btn ghost">Restaurar backup<input type="file" accept="application/json,.json" data-c="importar" hidden></label></div></div>
+  <div class="card"><h2>Seus dados</h2>
+    <label class="f">Altura (cm), para a conta cintura ÷ altura<input inputmode="numeric" data-c="altura" value="${esc(S.altura || 174)}"></label></div>
+  <p class="rodape centro">Sansão · ${S.sessoes.length} treinos registrados</p>`;
+}
+
+/* ---------- Corpo: peso e medidas ---------- */
+const MEDIDAS = [
+  ['peso', 'Peso', 'kg', 'De manhã, em jejum, depois de ir ao banheiro. Pese 2 ou 3 vezes por semana: o que vale é a média.'],
+  ['cintura', 'Cintura', 'cm', 'Na altura do umbigo, barriga relaxada, no fim de uma expiração normal. É a medida que mais mostra a perda de gordura.'],
+  ['peito', 'Peito', 'cm', 'Na linha dos mamilos, braços soltos ao lado do corpo.'],
+  ['braco', 'Braço', 'cm', 'Braço direito relaxado ao lado do corpo, no ponto mais grosso.'],
+  ['coxa', 'Coxa', 'cm', 'Coxa direita, em pé com o peso nas duas pernas, no ponto mais grosso.'],
+];
+function cartaoCorpo() {
+  const ms = S.medidas || [];
+  const ultimoDe = (k) => { for (let i = ms.length - 1; i >= 0; i--) if (ms[i][k] != null) return ms[i]; return null; };
+  const primeiroDe = (k) => ms.find((x) => x[k] != null) || null;
+  const linhas = MEDIDAS.map(([k, nome, un]) => {
+    const u = ultimoDe(k), p = primeiroDe(k); if (!u) return '';
+    const d = u[k] - p[k], sinal = d > 0 ? '+' : d < 0 ? '−' : '±';
+    return `<div class="item"><b>${nome}</b><span class="mono">${fmtNum(u[k])} ${un}${u !== p ? ` <span class="${(k === 'peso' || k === 'cintura') ? (d < 0 ? 'bom' : d > 0 ? 'ruim' : 'mut') : (d > 0 ? 'bom' : 'mut')}">${sinal}${fmtNum(Math.abs(d))}</span>` : ''}</span></div>`;
+  }).join('');
+  // média de peso dos últimos 7 dias contra os 7 anteriores
+  const agora = Date.now(), media = (a, b) => { const v = ms.filter((x) => x.peso != null && x.data > agora - a * 864e5 && x.data <= agora - b * 864e5).map((x) => x.peso); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+  const m1 = media(7, 0), m2 = media(14, 7);
+  const cint = ultimoDe('cintura'), rca = cint && S.altura ? cint.cintura / S.altura : null;
+  const ids = MEDIDAS.filter(([k]) => ms.filter((x) => x[k] != null).length).map(([k]) => k);
+  const sel = ids.includes(ui.evoCorpo) ? ui.evoCorpo : ids[0], def = MEDIDAS.find(([k]) => k === sel);
+  const pts = sel ? ms.filter((x) => x[sel] != null).map((x) => ({ t: x.data, kg: x[sel] })) : [];
+  const ultMed = ms.length ? ms[ms.length - 1].data : null, dias = ultMed ? Math.floor((agora - ultMed) / 864e5) : null;
+  return `<div class="card"><div class="row"><b class="grow">Corpo</b><button class="btn sm" data-a="medida-nova">+ registrar</button></div>
+    ${!ms.length ? '<p class="rodape">Registre peso e medidas para acompanhar a evolução do corpo. Sugestão: peso 2 ou 3 vezes por semana, medidas a cada 2 semanas, sempre de manhã e em jejum.</p>' : `
+    <div style="margin-top:8px">${linhas}</div>
+    ${m1 != null ? `<div class="item"><b>Média de peso da semana</b><span class="mono">${fmtNum(Math.round(m1 * 10) / 10)} kg${m2 != null ? ` <span class="${m1 < m2 ? 'bom' : m1 > m2 ? 'ruim' : 'mut'}">${m1 < m2 ? '−' : m1 > m2 ? '+' : '±'}${fmtNum(Math.round(Math.abs(m1 - m2) * 10) / 10)}</span>` : ''}</span></div>` : ''}
+    ${rca ? `<div class="item"><b>Cintura ÷ altura</b><span class="mono">${fmtNum(Math.round(rca * 100) / 100)} <span class="mut">(saudável: abaixo de 0,5)</span></span></div>` : ''}
+    ${ids.length ? `<select class="f" data-c="evo-corpo" aria-label="Medida" style="margin-top:10px">${ids.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${MEDIDAS.find((x) => x[0] === k)[1]}</option>`).join('')}</select>
+      ${grafico(pts, def[2], 'registros')}` : ''}
+    ${dias != null && dias >= 14 ? `<p class="fase">Faz ${dias} dias que você não registra medidas.</p>` : ''}
+    <div style="margin-top:10px">${[...ms].reverse().slice(0, 6).map((x) => `<div class="item"><span>${esc(fmtData(x.data))}</span><span class="mono mut" style="text-align:right">${MEDIDAS.filter(([k]) => x[k] != null).map(([k, nome, un]) => (un === 'kg' ? `${fmtNum(x[k])} kg` : `${nome.toLowerCase().slice(0, 4)}. ${fmtNum(x[k])}`)).join(' · ')} <button class="lnk verm" style="padding:0 0 0 6px" data-a="medida-apagar" data-id="${x.id}" aria-label="Apagar registro">×</button></span></div>`).join('')}</div>`}
+  </div>`;
+}
+function folhaMedida() {
+  const hoje = new Date(), iso = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+  abrirFolha(`<h2>Registrar medidas</h2><div class="mut small">Preencha só o que mediu hoje. Fita métrica justa na pele, sem apertar.</div>
+    <label class="f">Data<input type="date" id="m-data" value="${iso}"></label>
+    ${MEDIDAS.map(([k, nome, un, dica]) => `<label class="f">${nome} (${un})<input id="m-${k}" inputmode="decimal" placeholder="${un}"></label><div class="obs" style="margin-top:4px">${dica}</div>`).join('')}
+    <div class="stack" style="margin-top:14px"><button class="btn pri" data-a="medida-salvar">Salvar</button><button class="btn ghost" data-a="fechar">Cancelar</button></div>`);
 }
 
 /* ---------- Folhas ---------- */
@@ -541,9 +611,9 @@ function folhaCardio(w) {
 }
 
 /* ---------- Desenho ---------- */
-const ABAS = [['hoje', 'Hoje'], ['historico', 'Histórico'], ['evolucao', 'Evolução'], ['treinos', 'Treinos']];
+const ABAS = [['hoje', 'Hoje'], ['historico', 'Histórico'], ['evolucao', 'Evolução'], ['treinos', 'Treinos'], ['ajustes', 'Ajustes']];
 function desenhar() {
-  const telas = { hoje: telaHoje, historico: telaHistorico, evolucao: telaEvolucao, treinos: telaTreinos };
+  const telas = { hoje: telaHoje, historico: telaHistorico, evolucao: telaEvolucao, treinos: telaTreinos, ajustes: telaAjustes };
   $('#app').innerHTML = telas[ui.aba]();
   sincronizarVoltar();
   $('#nav').innerHTML = ABAS.map(([k, v]) => `<button class="${ui.aba === k ? 'on' : ''}" data-a="aba" data-k="${k}"><span>${v}${k === 'hoje' && S.atual && ui.aba !== 'hoje' ? ' <i>●</i>' : ''}</span></button>`).join('');
@@ -589,7 +659,7 @@ const acoes = {
     if (num(s.reps) == null || num(s.reps) <= 0) { aviso(it.un === 's' ? 'Digite quantos segundos você fez.' : 'Digite quantas repetições você fez.'); const c = $(`input[data-c="reps"][data-i="${i}"][data-s="${j}"]`); if (c) c.focus(); return; }
     s.ok = true;
     salvar(); redesenharItem(i);
-    const ultimaDeTodas = S.atual.itens.every((x) => x.sets.every((y) => y.ok));
+    const ultimaDeTodas = S.atual.itens.every((x) => x.pulado || x.sets.every((y) => y.ok));
     if (!ultimaDeTodas) iniciarTimer([{ rot: 'Descanso', dur: it.descanso }]);
     else { pararTimer(); aviso('Musculação concluída. Agora o cardio!'); }
   },
@@ -626,6 +696,30 @@ const acoes = {
   },
   'aviso-fundo': () => { S.avisoFundo = S.avisoFundo === false; salvar(); if (S.avisoFundo) { pedirPermissaoAviso(); enviarDescanso(); } else avisarSW({ tipo: 'parar' }); desenhar(); },
   'permissao': () => { try { Notification.requestPermission().then(() => desenhar()); } catch (e) { /* sem notificações */ } },
+  pular: (d) => {
+    const i = +d.i, it = S.atual.itens[i];
+    it.pulado = !it.pulado; if (S.crono && S.crono.i === i) S.crono = null;
+    salvar(); redesenharItem(i);
+    if (it.pulado && S.atual.itens.every((x) => x.pulado || x.sets.every((y) => y.ok))) { pararTimer(); aviso('Musculação concluída. Agora o cardio!'); }
+  },
+  'cardio-pular': () => { const c = S.atual.cardio; c.pulado = !c.pulado; if (c.pulado) c.ok = false; if (S.timer && S.timer.cardio) pararTimer(); salvar(); redesenharCardio(); },
+  'hist-sem-cardio': (d) => {
+    const s = S.sessoes.find((x) => x.id === +d.id);
+    if (s && confirm('Tirar o cardio deste treino do histórico?')) { s.cardio.ok = false; s.cardio.pulado = true; salvar(); desenhar(); }
+  },
+  'medida-nova': () => folhaMedida(),
+  'medida-salvar': () => {
+    const data = $('#m-data').value ? new Date(`${$('#m-data').value}T12:00:00`).getTime() : Date.now();
+    const r = { id: Date.now(), data };
+    let algum = false;
+    MEDIDAS.forEach(([k]) => { const v = num($(`#m-${k}`).value); if (v != null && v > 0) { r[k] = v; algum = true; } });
+    if (!algum) { aviso('Preencha pelo menos uma medida.'); return; }
+    S.medidas = [...(S.medidas || []), r].sort((x, y) => x.data - y.data); salvar(); fecharFolha(); desenhar(); aviso('Medidas registradas.');
+  },
+  'medida-apagar': (d) => {
+    if (!confirm('Apagar este registro de medidas?')) return;
+    S.medidas = (S.medidas || []).filter((x) => x.id !== +d.id); S.medidasApagadas = [...(S.medidasApagadas || []), +d.id]; salvar(); desenhar();
+  },
   'leve-ok': (d) => { const it = S.atual.itens[+d.i]; it.leveOk = !it.leveOk; salvar(); redesenharItem(+d.i); },
   'aquec-ok': () => { S.atual.aquecOk = !S.atual.aquecOk; salvar(); desenhar(); },
   'reiniciar-fase': () => { if (confirm('Recomeçar a contagem das semanas? O próximo treino volta a ser a semana 1 (adaptação).')) { S.planoInicio = null; salvar(); desenhar(); } },
@@ -670,6 +764,7 @@ const acoes = {
     a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }));
     a.download = `sansao-backup-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    S.ultimoBackup = Date.now(); salvar(); desenhar();
     aviso('Backup salvo na pasta de downloads.');
   },
   'plano-original': () => { if (confirm('Voltar os 5 treinos ao plano original? Suas edições nos treinos serão perdidas (o histórico continua).')) { S.plano = clone(PLANO); S.proximo = 0; salvar(); desenhar(); } },
@@ -692,11 +787,13 @@ document.addEventListener('input', (ev) => {
     });
     salvar();
   }
+  else if (d.c === 'altura') { const v = num(ev.target.value); if (v && v > 100 && v < 250) { S.altura = v; salvar(); } }
   else if (d.c === 'nota') { const v = ev.target.value.trim(); if (v) S.notas[d.ex] = v; else delete S.notas[d.ex]; salvar(); }
 });
 document.addEventListener('change', (ev) => {
   const d = ev.target.dataset;
   if (d.c === 'evo') { ui.evo = ev.target.value; desenhar(); }
+  else if (d.c === 'evo-corpo') { ui.evoCorpo = ev.target.value; desenhar(); }
   else if (d.c === 'importar' && ev.target.files[0]) {
     const r = new FileReader();
     r.onload = () => {
