@@ -18,22 +18,60 @@ function estadoInicial() {
   return { v: 1, plano: clone(PLANO), planoVersao: PLANO.versao, planoInicio: null, proximo: 0, sessoes: [], atual: null, notas: {}, timer: null };
 }
 let planoAtualizado = false;
-function carregar() {
-  try {
-    const s = JSON.parse(localStorage.getItem(CHAVE));
-    if (s && s.plano && Array.isArray(s.sessoes)) {
-      const e = { ...estadoInicial(), ...s, planoVersao: s.planoVersao };
-      // o plano mudou desde a última vez: troca pelo novo e mantém histórico, anotações e cargas
-      if (e.planoVersao !== PLANO.versao) { if (!(e.planoVersao >= 2)) { e.proximo = 0; planoAtualizado = 'ordem'; } else planoAtualizado = 'ajuste'; e.plano = clone(PLANO); e.planoVersao = PLANO.versao; }
-      return e;
-    }
-  } catch (e) { /* começa do zero */ }
-  return estadoInicial();
+const valido = (s) => s && s.plano && Array.isArray(s.sessoes);
+// o plano mudou desde a última vez: troca pelo novo e mantém histórico, anotações e cargas
+function migrar(s) {
+  const e = { ...estadoInicial(), ...s, planoVersao: s.planoVersao };
+  if (e.planoVersao !== PLANO.versao) { if (!(e.planoVersao >= 2)) { e.proximo = 0; planoAtualizado = 'ordem'; } else planoAtualizado = 'ajuste'; e.plano = clone(PLANO); e.planoVersao = PLANO.versao; }
+  return e;
+}
+function lerGuardado() { try { const s = JSON.parse(localStorage.getItem(CHAVE)); return valido(s) ? s : null; } catch (e) { return null; } }
+function carregar() { const s = lerGuardado(); return s ? migrar(s) : estadoInicial(); }
+/* Junta duas cópias dos dados sem perder treino finalizado. Vale a cópia gravada por último (rev maior), mas os treinos
+   finalizados das duas são somados. Isso resolve o caso de duas janelas do Sansão abertas (o app e uma aba do Chrome,
+   por exemplo): a janela velha não apaga mais o que a outra gravou. */
+function mesclar(a, b) {
+  if (!valido(b)) return a; if (!valido(a)) return b;
+  const base = (b.rev || 0) > (a.rev || 0) ? b : a, outro = base === a ? b : a;
+  const apagadas = [...new Set([...(a.apagadas || []), ...(b.apagadas || [])])];
+  const porId = new Map(); [...outro.sessoes, ...base.sessoes].forEach((s) => porId.set(s.id, s));
+  const sessoes = [...porId.values()].filter((s) => !apagadas.includes(s.id)).sort((x, y) => x.fim - y.fim);
+  const m = { ...base, sessoes, apagadas, notas: { ...(outro.notas || {}), ...(base.notas || {}) }, rev: Math.max(a.rev || 0, b.rev || 0) };
+  const ult = sessoes[sessoes.length - 1];
+  if (ult && ult.idx != null && !base.sessoes.some((s) => s.id === ult.id)) m.proximo = (ult.idx + 1) % m.plano.treinos.length;
+  if (m.atual && sessoes.some((s) => s.id === m.atual.id)) m.atual = null;
+  return m;
 }
 let S = carregar();
+let revLida = S.rev || 0;
 function salvar() {
-  try { localStorage.setItem(CHAVE, JSON.stringify(S)); } catch (e) { aviso('Não consegui salvar. Faça um backup em Treinos.'); }
+  try {
+    // outra janela gravou depois da última leitura: junta antes, para não gravar por cima com dados velhos
+    const g = lerGuardado();
+    if (g && (g.rev || 0) > revLida) { S = migrar(mesclar(S, g)); setTimeout(() => { desenhar(); aviso('Dados atualizados com os da outra janela do Sansão.'); }, 0); }
+    S.rev = Math.max(S.rev || 0, g ? g.rev || 0 : 0) + 1; S.salvoEm = Date.now();
+    localStorage.setItem(CHAVE, JSON.stringify(S)); revLida = S.rev;
+    agendarCopia();
+  } catch (e) { aviso('Não consegui salvar. Faça um backup em Treinos.'); }
 }
+/* Segunda cópia no IndexedDB, gravada em modo "strict" (vai para o disco na hora). O localStorage pode perder os
+   últimos segundos se o Android fechar o app; ao abrir, as duas cópias são juntadas. */
+let idbP = null;
+const idb = () => (idbP = idbP || new Promise((ok, erro) => { const r = indexedDB.open('sansao', 1); r.onupgradeneeded = () => r.result.createObjectStore('estado'); r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error); }));
+async function gravarCopia() {
+  try { const db = await idb(), dados = clone(S); await new Promise((ok, erro) => { const tx = db.transaction('estado', 'readwrite', { durability: 'strict' }); tx.objectStore('estado').put(dados, 'S'); tx.oncomplete = ok; tx.onerror = () => erro(tx.error); }); } catch (e) { /* segue só com o localStorage */ }
+}
+async function lerCopia() {
+  try { const db = await idb(); return await new Promise((ok) => { const r = db.transaction('estado').objectStore('estado').get('S'); r.onsuccess = () => ok(valido(r.result) ? r.result : null); r.onerror = () => ok(null); }); } catch (e) { return null; }
+}
+let copiaT = 0;
+function agendarCopia() { clearTimeout(copiaT); copiaT = setTimeout(gravarCopia, 400); }
+// volta a ler o que está gravado (outra janela pode ter mexido) e redesenha se mudou
+function recarregarSeMudou() {
+  const g = lerGuardado();
+  if (g && (g.rev || 0) > revLida) { S = migrar(mesclar(S, g)); revLida = S.rev || 0; desenhar(); }
+}
+window.addEventListener('storage', (ev) => { if (ev.key === CHAVE) recarregarSeMudou(); });
 const ui = { aba: 'hoje', escolha: null, hist: null, evo: null };
 
 /* ---------- Consultas ---------- */
@@ -111,57 +149,31 @@ async function telaAcesa() {
     else if (!S.atual && trava) { await trava.release(); trava = null; }
   } catch (e) { /* não suportado */ }
 }
-document.addEventListener('visibilitychange', () => { telaAcesa(); tique(); if (!document.hidden) fecharNotificacoes(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { clearTimeout(copiaT); gravarCopia(); enviarDescanso(); } else { recarregarSeMudou(); fecharNotificacoes(); }
+  telaAcesa(); tique();
+});
+window.addEventListener('pagehide', () => { clearTimeout(copiaT); gravarCopia(); });
 
 /* ---------- Aviso de descanso com o Sansão em segundo plano ----------
-   O Android congela páginas em segundo plano, mas não as que estão tocando áudio. Por isso o descanso toca um áudio
-   silencioso com os bipes já embutidos no fim: o som sai mesmo com outro aplicativo aberto, e o Android mostra o
-   descanso na barra de notificações (Media Session). No fim também vai uma notificação com vibração. */
-const fundo = new Audio();
-let fundoUrl = null;
-fundo.addEventListener('playing', () => { if (S.timer) S.timer.fundo = true; });
-fundo.addEventListener('pause', () => { if (!fundo.ended && S.timer) S.timer.fundo = false; });
-fundo.addEventListener('ended', () => { limparFundo(); tique(); });
-// gera um WAV (8 kHz, 8 bits, mono) de silêncio com bipes nos tempos pedidos
-function wavAviso(marcas, total) {
-  const sr = 8000, n = Math.ceil((total + 1.5) * sr), buf = new ArrayBuffer(44 + n), v = new DataView(buf), b = new Uint8Array(buf);
-  const txt = (o, t) => { for (let k = 0; k < t.length; k++) b[o + k] = t.charCodeAt(k); };
-  txt(0, 'RIFF'); v.setUint32(4, 36 + n, true); txt(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, sr, true); v.setUint32(28, sr, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); txt(36, 'data'); v.setUint32(40, n, true);
-  b.fill(128, 44);
-  for (const m of marcas) for (let k = 0; k < m.n; k++) {
-    const ini = Math.round((m.t + k * 0.3) * sr), dur = Math.round(0.22 * sr);
-    for (let x = 0; x < dur && ini + x < n; x++) { if (ini + x < 0) continue; const env = Math.min(1, x / 80, (dur - x) / 400); b[44 + ini + x] = 128 + Math.round(110 * env * Math.sin((2 * Math.PI * m.f * x) / sr)); }
-  }
-  return new Blob([buf], { type: 'audio/wav' });
+   Quem cuida do aviso fora da tela é o service worker (sw.js): ele recebe o fim do descanso, mantém uma notificação
+   na barra com o tempo restante (atualizada a cada 5 s) e, no fim, troca por uma notificação com som e vibração.
+   Não toca áudio nenhum, então não pausa a música de outro aplicativo. */
+function avisarSW(msg) { try { const c = navigator.serviceWorker && navigator.serviceWorker.controller; if (c) { c.postMessage(msg); return true; } } catch (e) { /* sem service worker */ } return false; }
+function enviarDescanso() {
+  const T = S.timer; if (!T || S.avisoFundo === false) return;
+  let acc = T.inicio;
+  const fases = T.fases.map((f) => { acc += f.dur * 1000; return { rot: f.rot + (f.volta ? ` · ${f.volta}` : ''), fim: acc }; });
+  const hora = new Date(acc).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  avisarSW({ tipo: 'descanso', id: `${T.inicio}:${acc}`, fim: acc, fases, hora,
+    corpo: T.cardio ? `Termina às ${hora}` : proximaSerie(),
+    final: T.cardio ? { titulo: 'Cardio concluído', corpo: 'Volte ao Sansão para finalizar o treino.' } : { titulo: 'Descanso acabou', corpo: proximaSerie() } });
 }
-function limparFundo() {
-  try { fundo.pause(); fundo.removeAttribute('src'); fundo.load(); } catch (e) { /* sem áudio */ }
-  if (fundoUrl) { URL.revokeObjectURL(fundoUrl); fundoUrl = null; }
-  try { if ('mediaSession' in navigator) { navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; } } catch (e) { /* sem media session */ }
-}
-function tocarFundo() {
-  const T = S.timer; if (!T) return;
-  T.fundo = false;
-  if (S.avisoFundo === false) { limparFundo(); return; }
-  try {
-    const total = T.fases.reduce((a, f) => a + f.dur, 0), dec = (Date.now() - T.inicio) / 1000;
-    if (total - dec < 2) return;
-    const marcas = []; let acc = 0;
-    T.fases.forEach((f, k) => { if (k) marcas.push({ t: acc, n: 2, f: f.forte ? 1040 : 660 }); acc += f.dur; for (let s = 3; s >= 1; s--) marcas.push({ t: acc - s, n: 1, f: 620 }); });
-    marcas.push({ t: total, n: 3, f: 1040 });
-    limparFundo();
-    fundoUrl = URL.createObjectURL(wavAviso(marcas, total)); fundo.src = fundoUrl; fundo.currentTime = Math.max(0, dec);
-    fundo.play().then(() => {
-      if (!('mediaSession' in navigator)) return;
-      const ms = navigator.mediaSession;
-      ms.metadata = new MediaMetadata({ title: `${T.cardio ? 'Cardio' : 'Descanso'} · ${fmtTempo(total)}`, artist: 'Sansão', album: S.atual ? S.atual.nome : '', artwork: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }] });
-      ms.playbackState = 'playing';
-      try { ms.setPositionState({ duration: total + 1.5, position: Math.min(total, Math.max(0, fundo.currentTime)), playbackRate: 1 }); } catch (e) { /* sem barra de progresso */ }
-      ms.setActionHandler('pause', () => {}); ms.setActionHandler('play', () => { fundo.play().catch(() => {}); });
-      try { ms.setActionHandler('nexttrack', () => acoes['t-pular']()); } catch (e) { /* sem botão de pular */ }
-    }).catch(() => { if (S.timer) S.timer.fundo = false; });
-  } catch (e) { /* segue só com o cronômetro da tela */ }
+function permissaoTexto() {
+  if (!('Notification' in window)) return '<p class="rodape">Este navegador não mostra notificações.</p>';
+  if (Notification.permission === 'granted') return '<p class="rodape">Notificações liberadas.</p>';
+  if (Notification.permission === 'denied') return '<p class="rodape">As notificações estão bloqueadas. Libere em Configurações do Android → Apps → Sansão (ou Chrome) → Notificações.</p>';
+  return '<button class="link" data-a="permissao">liberar notificações</button>';
 }
 function pedirPermissaoAviso() { try { if (S.avisoFundo !== false && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch (e) { /* sem notificações */ } }
 function notificar(titulo, corpo) {
@@ -180,10 +192,10 @@ function proximaSerie() {
 /* ---------- Cronômetro (descanso e cardio) ---------- */
 function iniciarTimer(fases, opts = {}) {
   S.timer = { inicio: Date.now(), fases, cardio: !!opts.cardio, fase: 0, bip: -1 };
-  tocarFundo(); salvar(); tique();
+  enviarDescanso(); salvar(); tique();
 }
-// manterSom: no fim natural do tempo o áudio continua por mais um instante, para tocar os bipes finais
-function pararTimer(manterSom) { S.timer = null; if (!manterSom) limparFundo(); salvar(); $('#timer').hidden = true; }
+// fimNatural: o tempo acabou sozinho; aí quem avisa fora da tela é o service worker, então não cancela o aviso dele
+function pararTimer(fimNatural) { S.timer = null; if (!fimNatural) avisarSW({ tipo: 'parar' }); salvar(); $('#timer').hidden = true; }
 function tique() {
   const rel = $('#relogio');
   if (rel && S.atual) rel.textContent = fmtTempo((Date.now() - S.atual.inicio) / 1000);
@@ -201,9 +213,9 @@ function tique() {
   const dec = (Date.now() - T.inicio) / 1000;
   if (dec >= total) {
     const eraCardio = T.cardio;
-    const comFundo = T.fundo;
-    pararTimer(comFundo); if (!comFundo) som(3, 1040); vibrar([300, 150, 300, 150, 300]);
-    notificar(eraCardio ? 'Cardio concluído' : 'Descanso acabou', eraCardio ? 'Volte ao Sansão para finalizar o treino.' : proximaSerie());
+    pararTimer(true);
+    if (!document.hidden) { som(3, 1040); vibrar([300, 150, 300, 150, 300]); }
+    else if (!(navigator.serviceWorker && navigator.serviceWorker.controller)) notificar(eraCardio ? 'Cardio concluído' : 'Descanso acabou', eraCardio ? 'Volte ao Sansão para finalizar o treino.' : proximaSerie());
     if (eraCardio && S.atual) { S.atual.cardio.ok = true; salvar(); if (ui.aba === 'hoje') desenhar(); aviso('Cardio concluído!'); }
     else aviso('Descanso acabou. Próxima série!');
     return;
@@ -211,9 +223,9 @@ function tique() {
   let acc = 0, i = 0;
   while (i < T.fases.length - 1 && dec >= acc + T.fases[i].dur) { acc += T.fases[i].dur; i++; }
   const f = T.fases[i], resta = f.dur - (dec - acc);
-  if (i !== T.fase) { T.fase = i; T.bip = -1; if (!T.fundo) som(2, f.forte ? 1040 : 660); vibrar([200, 100, 200]); }
+  if (i !== T.fase) { T.fase = i; T.bip = -1; if (!document.hidden) { som(2, f.forte ? 1040 : 660); vibrar([200, 100, 200]); } }
   const seg = Math.ceil(resta);
-  if (seg <= 3 && seg !== T.bip) { T.bip = seg; if (!T.fundo) som(1, 620); }
+  if (seg <= 3 && seg !== T.bip) { T.bip = seg; if (!document.hidden) som(1, 620); }
   const multi = T.fases.length > 1;
   el.hidden = false;
   el.className = f.forte ? 'forte' : '';
@@ -439,7 +451,8 @@ function telaTreinos() {
     <button class="link" data-a="novo-ex" data-w="${w}">+ adicionar exercício</button></div>`).join('')}
   <div class="card"><h2>Fase do plano</h2><div class="mut small">${S.planoInicio ? `Começou em ${esc(fmtData(S.planoInicio))}. Você está na semana ${fasePlano().sem}.` : 'A contagem começa no primeiro treino.'} Semanas 1 e 2: adaptação, com uma série a menos. Semana 6: alívio, com metade das séries. O plano vale por 8 a 12 semanas.</div>
     ${S.planoInicio ? '<button class="link" data-a="reiniciar-fase">recomeçar a contagem das semanas</button>' : ''}</div>
-  <div class="card"><h2>Aviso de descanso</h2><div class="mut small">Com o aviso ligado, o descanso aparece na barra de notificações e o bipe toca mesmo com outro aplicativo aberto. Se ele pausar a música de outro aplicativo, desligue aqui.</div>
+  <div class="card"><h2>Aviso de descanso</h2><div class="mut small">Com o aviso ligado, quando você sai do Sansão durante o descanso aparece uma notificação com o tempo que falta, e no fim ela vibra e toca o som de notificação. Não mexe na música.</div>
+    ${permissaoTexto()}
     <button class="btn" style="margin-top:10px" data-a="aviso-fundo">${S.avisoFundo === false ? 'Desligado · tocar para ligar' : 'Ligado · tocar para desligar'}</button></div>
   <div class="card"><h2>Backup</h2><div class="mut small">Os dados ficam só neste celular. Salve um arquivo de backup de vez em quando.</div>
     <div class="stack" style="margin-top:10px"><button class="btn" data-a="exportar">Salvar backup</button>
@@ -448,8 +461,8 @@ function telaTreinos() {
 }
 
 /* ---------- Folhas ---------- */
-function abrirFolha(html) { const s = $('#sheet'); s.innerHTML = `<div class="box">${html}</div>`; s.hidden = false; }
-function fecharFolha() { $('#sheet').hidden = true; $('#sheet').innerHTML = ''; }
+function abrirFolha(html) { const s = $('#sheet'); s.innerHTML = `<div class="box">${html}</div>`; s.hidden = false; sincronizarVoltar(); }
+function fecharFolha() { $('#sheet').hidden = true; $('#sheet').innerHTML = ''; sincronizarVoltar(); }
 function folhaDetalhe(i) {
   const it = S.atual.itens[i];
   const hist = S.sessoes.map((s) => ({ s, it: s.itens.find((x) => x.ex === it.ex) })).filter((x) => x.it).slice(-4).reverse();
@@ -532,6 +545,7 @@ const ABAS = [['hoje', 'Hoje'], ['historico', 'Histórico'], ['evolucao', 'Evolu
 function desenhar() {
   const telas = { hoje: telaHoje, historico: telaHistorico, evolucao: telaEvolucao, treinos: telaTreinos };
   $('#app').innerHTML = telas[ui.aba]();
+  sincronizarVoltar();
   $('#nav').innerHTML = ABAS.map(([k, v]) => `<button class="${ui.aba === k ? 'on' : ''}" data-a="aba" data-k="${k}"><span>${v}${k === 'hoje' && S.atual && ui.aba !== 'hoje' ? ' <i>●</i>' : ''}</span></button>`).join('');
   tique();
 }
@@ -539,6 +553,26 @@ function redesenharItem(i) { const el = $(`#it-${i}`); if (el) el.outerHTML = ca
 function redesenharCardio() { const el = $('#cardio'); if (el) el.outerHTML = cartaoCardio(); const p = $('#prog'); if (p) p.outerHTML = progHTML(); }
 let avisoT = 0;
 function aviso(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(avisoT); avisoT = setTimeout(() => { t.hidden = true; }, 2600); }
+
+/* ---------- Botão voltar do Android ----------
+   Sem isto, o voltar fecha o app. Agora ele fecha a janela aberta, depois volta para a aba Hoje; com treino em
+   andamento pede um segundo toque para sair. Funciona guardando uma entrada extra no histórico do navegador. */
+let armado = false, ignorarPop = false, saidaAte = 0;
+const precisaArmar = () => !$('#sheet').hidden || ui.aba !== 'hoje' || !!S.atual;
+function sincronizarVoltar() {
+  if (Date.now() < saidaAte) return;
+  const quer = precisaArmar();
+  if (quer && !armado) { history.pushState({ sansao: 1 }, ''); armado = true; }
+  else if (!quer && armado) { armado = false; ignorarPop = true; history.back(); }
+}
+window.addEventListener('popstate', () => {
+  if (ignorarPop) { ignorarPop = false; return; }
+  armado = false;
+  if (!$('#sheet').hidden) { $('#sheet').hidden = true; $('#sheet').innerHTML = ''; if (S.atual && ui.aba === 'hoje') desenhar(); }
+  else if (ui.aba !== 'hoje') { ui.aba = 'hoje'; desenhar(); window.scrollTo(0, 0); }
+  else if (S.atual) { aviso('Treino em andamento. Toque em voltar de novo para sair; nada se perde.'); saidaAte = Date.now() + 2500; setTimeout(sincronizarVoltar, 2600); return; }
+  sincronizarVoltar();
+});
 
 /* ---------- Ações ---------- */
 const acoes = {
@@ -590,7 +624,8 @@ const acoes = {
       redesenharItem(i); tique();
     }
   },
-  'aviso-fundo': () => { S.avisoFundo = S.avisoFundo === false; salvar(); if (S.avisoFundo) pedirPermissaoAviso(); else limparFundo(); desenhar(); },
+  'aviso-fundo': () => { S.avisoFundo = S.avisoFundo === false; salvar(); if (S.avisoFundo) { pedirPermissaoAviso(); enviarDescanso(); } else avisarSW({ tipo: 'parar' }); desenhar(); },
+  'permissao': () => { try { Notification.requestPermission().then(() => desenhar()); } catch (e) { /* sem notificações */ } },
   'leve-ok': (d) => { const it = S.atual.itens[+d.i]; it.leveOk = !it.leveOk; salvar(); redesenharItem(+d.i); },
   'aquec-ok': () => { S.atual.aquecOk = !S.atual.aquecOk; salvar(); desenhar(); },
   'reiniciar-fase': () => { if (confirm('Recomeçar a contagem das semanas? O próximo treino volta a ser a semana 1 (adaptação).')) { S.planoInicio = null; salvar(); desenhar(); } },
@@ -603,11 +638,11 @@ const acoes = {
     } else iniciarTimer([{ rot: `Cardio · ${ap}`, dur: c.min * 60 }], { cardio: true });
     som(1, 880); redesenharCardio();
   },
-  't-mais': () => { if (S.timer) { S.timer.fases[0].dur += 15; tocarFundo(); salvar(); tique(); } },
-  't-menos': () => { if (S.timer) { S.timer.fases[0].dur = Math.max(1, S.timer.fases[0].dur - 15); tocarFundo(); salvar(); tique(); } },
+  't-mais': () => { if (S.timer) { S.timer.fases[0].dur += 15; enviarDescanso(); salvar(); tique(); } },
+  't-menos': () => { if (S.timer) { S.timer.fases[0].dur = Math.max(1, S.timer.fases[0].dur - 15); enviarDescanso(); salvar(); tique(); } },
   't-pular': () => { const c = S.timer && S.timer.cardio; pararTimer(); if (c) redesenharCardio(); },
   hist: (d) => { ui.hist = ui.hist === +d.id ? null : +d.id; desenhar(); },
-  'apagar-sessao': (d) => { if (confirm('Apagar este treino do histórico? Não dá para desfazer.')) { S.sessoes = S.sessoes.filter((s) => s.id !== +d.id); salvar(); desenhar(); } },
+  'apagar-sessao': (d) => { if (confirm('Apagar este treino do histórico? Não dá para desfazer.')) { S.sessoes = S.sessoes.filter((s) => s.id !== +d.id); S.apagadas = [...(S.apagadas || []), +d.id]; salvar(); desenhar(); } },
   editar: (d) => folhaEditar(+d.w, +d.i),
   'novo-ex': (d) => folhaEditar(+d.w, null),
   'editar-cardio': (d) => folhaCardio(+d.w),
@@ -678,6 +713,15 @@ document.addEventListener('change', (ev) => {
 document.addEventListener('focusin', (ev) => { if (ev.target.matches('.set input')) ev.target.select(); });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* sem armazenamento persistente */ }
 telaAcesa();
 desenhar();
+// junta com a cópia do IndexedDB (pode ter o que o localStorage perdeu quando o Android fechou o app)
+lerCopia().then((c) => {
+  if (!c) { gravarCopia(); return; }
+  const antes = JSON.stringify([S.rev, S.sessoes.length, !!S.atual]);
+  S = migrar(mesclar(S, c));
+  if (JSON.stringify([S.rev, S.sessoes.length, !!S.atual]) !== antes) { localStorage.setItem(CHAVE, JSON.stringify(S)); revLida = S.rev || 0; desenhar(); }
+  gravarCopia();
+});
 if (planoAtualizado) { salvar(); aviso(planoAtualizado === 'ordem' ? 'Treino atualizado: nova ordem de A a E.' : 'Treino atualizado.'); }

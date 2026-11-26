@@ -1,4 +1,4 @@
-const VERSAO = 'sansao-v5';
+const VERSAO = 'sansao-v6';
 const ARQUIVOS = ['./', 'index.html', 'styles.css', 'data.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png',
   'fonts/fraunces-italico.woff2',
   'fonts/fraunces.woff2',
@@ -172,6 +172,41 @@ const ARQUIVOS = ['./', 'index.html', 'styles.css', 'data.js', 'app.js', 'manife
 ];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSAO).then((c) => c.addAll(ARQUIVOS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== VERSAO).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
+/* ---------- Aviso de descanso fora da tela ----------
+   O app manda o fim do descanso. Enquanto o Sansão não estiver na tela, aqui fica uma notificação silenciosa com o
+   tempo que falta (atualizada a cada 5 s); no fim, ela vira um aviso com som de notificação e vibração.
+   O Chrome encerra o service worker depois de uns 5 minutos; para tempos maiores (cardio), mostra só a hora do fim. */
+let descanso = null;
+const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+const relogio = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+async function algumVisivel() { const cs = await self.clients.matchAll({ type: 'window', includeUncontrolled: true }); return cs.some((c) => c.visibilityState === 'visible'); }
+async function fecharAviso() { const ns = await self.registration.getNotifications({ tag: 'descanso' }); ns.forEach((n) => n.close()); }
+function mostrar(titulo, corpo, alerta) {
+  const op = { tag: 'descanso', body: corpo, icon: 'icon-192.png', badge: 'icon-192.png', renotify: !!alerta, silent: !alerta };
+  if (alerta) op.vibrate = [300, 150, 300, 150, 300];
+  return self.registration.showNotification(titulo, op).catch(() => {});
+}
+async function vigiar(id) {
+  const limite = Date.now() + 4.5 * 60e3;
+  let faseAnterior = -1;
+  while (descanso && descanso.id === id) {
+    const d = descanso, agora = Date.now();
+    if (agora >= d.fim - 150) { descanso = null; if (!(await algumVisivel())) await mostrar(d.final.titulo, d.final.corpo, true); return; }
+    if (agora > limite) { if (!(await algumVisivel())) await mostrar(`Cardio · termina às ${d.hora}`, d.corpo, false); return; }
+    let k = d.fases.findIndex((f) => agora < f.fim - 150); if (k < 0) k = d.fases.length - 1;
+    const f = d.fases[k];
+    if (await algumVisivel()) await fecharAviso();
+    else await mostrar(`${f.rot} · falta ${relogio(f.fim - agora)}`, d.corpo, faseAnterior !== -1 && k !== faseAnterior);
+    faseAnterior = k;
+    const ateTroca = f.fim - Date.now();
+    await espera(Math.max(200, Math.min(5000, ateTroca > 5500 ? 5000 : ateTroca)));
+  }
+}
+self.addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (d.tipo === 'descanso') { descanso = d; e.waitUntil(vigiar(d.id)); }
+  else if (d.tipo === 'parar') { descanso = null; e.waitUntil(fecharAviso()); }
+});
 // tocar na notificação de fim de descanso traz o Sansão para a frente
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
